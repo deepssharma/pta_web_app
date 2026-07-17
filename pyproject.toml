@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pta-treasurer"
+version = "0.1.0"
+description = "Cross-platform desktop app for generating PTA/school treasurer reports"
+requires-python = ">=3.10"
+dependencies = [
+    "openpyxl==3.1.2",
+    "pdfplumber==0.11.0",
+    "python-dotenv==1.0.1",
+    "httpx==0.28.1",
+    "PySide6",
+    "platformdirs",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.5",
+    "pyinstaller",
+]
+givebacks = [
+    "playwright==1.48.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

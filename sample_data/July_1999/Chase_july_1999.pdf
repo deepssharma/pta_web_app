@@ -1,0 +1,93 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 6 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >>
+endobj
+4 0 obj
+<< >>
+endobj
+5 0 obj
+<< /Length 904 >>
+stream
+BT
+/F1 9 Tf
+14 TL
+40 760 Td
+(JPMorgan Chase Bank, N.A. \(SYNTHETIC SAMPLE STATEMENT - NOT REAL DATA\)) Tj
+T*
+(Account Number: 0000000000000000) Tj
+T*
+(DEMO SCHOOL PTA) Tj
+T*
+(123 SAMPLE STREET) Tj
+T*
+(SAMPLE TOWN NY 11111-0000) Tj
+T*
+(July 01, 1999 through July 31, 1999) Tj
+T*
+() Tj
+T*
+(CHECKING SUMMARY) Tj
+T*
+(Beginning Balance $32,630.10) Tj
+T*
+(Checks Paid 1 -181.58) Tj
+T*
+(Electronic Withdrawals 1 -1,257.76) Tj
+T*
+(Ending Balance 2 $31,190.76) Tj
+T*
+() Tj
+T*
+(CHECKS PAID) Tj
+T*
+(CHECK NO. DATE PAID AMOUNT) Tj
+T*
+(1077 ^ 07/01 $181.58) Tj
+T*
+(Total Checks Paid $181.58) Tj
+T*
+() Tj
+T*
+(ELECTRONIC WITHDRAWALS) Tj
+T*
+(DATE DESCRIPTION AMOUNT) Tj
+T*
+(07/17 Orig CO Name:Sample Vendor Desc Date:250717 Ind Name:Demo School Pta $1,257.76) Tj
+T*
+(Total Electronic Withdrawals $1,257.76) Tj
+T*
+() Tj
+T*
+(DAILY ENDING BALANCE) Tj
+T*
+(DATE AMOUNT) Tj
+T*
+(07/01 $32,448.52) Tj
+T*
+(07/17 $31,190.76) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000262 00000 n 
+0000001217 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+1287
+%%EOF

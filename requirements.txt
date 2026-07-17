@@ -1,0 +1,18 @@
+# Core - required to generate reports
+openpyxl==3.1.2
+pdfplumber==0.11.0
+python-dotenv==1.0.1
+httpx==0.28.1
+
+# Desktop GUI + per-user app-data directory resolution
+# NOTE: not yet installed/verified in this environment - pin exact versions
+# once installed (`pip freeze`) rather than trusting these placeholders.
+PySide6
+platformdirs
+
+# Givebacks auto-download (opt-in feature, Phase 4/5 - see PLAN.md)
+playwright==1.48.0
+
+# Dev / test / packaging
+pytest==8.3.5
+pyinstaller

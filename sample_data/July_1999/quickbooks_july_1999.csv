@@ -1,0 +1,29 @@
+DEMO SCHOOL PTA (SYNTHETIC SAMPLE DATA - NOT REAL),,,,,,,,
+Transaction Detail by Account,,,,,,,,
+"July 1-31, 1999",,,,,,,,
+
+,Transaction date,Transaction type,Num,Name,Description,Split,Amount,Balance
+Checking (0000),,,,,,,,
+,07/01/1999,Check,1077,Jane Doe,CHECK # 1077,PROGRAM EXPENSE:Sixth Grade Activities:6th Grade Events:Picnic,-181.58,-181.58
+,07/17/1999,Expense,,Quickbooks Online,ORIG CO NAME:INTUIT * ORIG ID:XXXXXX0000 DESC DATE:990717 CO ENTRY DESCR:QBooks OnlSEC:CCD TRACE#:XXXXXXXX0000000 EED:990717 IND ID:0000000 IND NAME:DEMO SC HOOL PTA XXX-XXX-0000 TRN: XXXXXX0000 TC,EXPENSES:MANAGEMENT AND GENERAL:Accounting Expense (Quickbooks),"-1,257.76","-1,439.34"
+Total for Checking (0000),,,,,,,"-$1,439.34",
+EXPENSES,,,,,,,,
+MANAGEMENT AND GENERAL,,,,,,,,
+Accounting Expense (Quickbooks),,,,,,,,
+,07/17/1999,Expense,,Quickbooks Online,ORIG CO NAME:INTUIT * ORIG ID:XXXXXX0000 DESC DATE:990717 CO ENTRY DESCR:QBooks OnlSEC:CCD TRACE#:XXXXXXXX0000000 EED:990717 IND ID:0000000 IND NAME:DEMO SC HOOL PTA XXX-XXX-0000 TRN: XXXXXX0000 TC,Checking (0000),"1,257.76","1,257.76"
+Total for Accounting Expense (Quickbooks),,,,,,,"$1,257.76",
+Total for MANAGEMENT AND GENERAL with sub-accounts,,,,,,,"$1,257.76",
+Total for EXPENSES with sub-accounts,,,,,,,"$1,257.76",
+PROGRAM EXPENSE,,,,,,,,
+Sixth Grade Activities,,,,,,,,
+6th Grade Events,,,,,,,,
+Picnic,,,,,,,,
+,07/01/1999,Check,1077,Jane Doe,CHECK # 1077,Checking (0000),181.58,181.58
+Total for Picnic,,,,,,,$181.58,
+Total for 6th Grade Events with sub-accounts,,,,,,,$181.58,
+Total for Sixth Grade Activities with sub-accounts,,,,,,,$181.58,
+Total for PROGRAM EXPENSE with sub-accounts,,,,,,,$181.58,
+TOTAL,,,,,,,$0.00,
+
+
+"Accrual Basis Friday, January 01, 1999 12:00 PM GMTZ",,,,,,,,

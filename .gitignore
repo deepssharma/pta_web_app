@@ -1,0 +1,27 @@
+# Real financial data - never commit. This app handles real school
+# financial data just like pta_treasurer did, so the same rules apply
+# from day one. See tests/fixtures/ and sample_data/ for the one
+# deliberate exception: synthetic/anonymized data checked in on purpose.
+input/
+output/
+data/
+logs/
+*.xlsx
+*.pdf
+*.csv
+.env
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+tests/fixtures/*.pdf
+tests/fixtures/*.csv
+!tests/fixtures/*.pdf
+!tests/fixtures/*.csv
+
+!sample_data/
+!sample_data/**
+
+.DS_Store
