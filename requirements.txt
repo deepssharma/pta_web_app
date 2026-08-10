@@ -10,9 +10,20 @@ httpx==0.28.1
 PySide6
 platformdirs
 
-# Givebacks auto-download (opt-in feature, Phase 4/5 - see PLAN.md)
-playwright==1.48.0
+# credentials.py (OS keychain wrapper, used for the Givebacks password)
+# is a core dep -- settings_dialog.py imports it unconditionally.
+keyring==25.7.0
+
+# Givebacks auto-download (opt-in feature, Phase 4 - see PLAN.md)
+# NOTE: playwright must be >=1.50.0 in this project's Python 3.14 dev
+# env -- 1.48.0 pins greenlet==3.1.1 exactly, which has no cp314 wheel.
+playwright==1.62.0
+
+# AI Assistant chat panel (opt-in feature, Phase 5 - see PLAN.md) needs
+# no extra package -- it talks to a local Ollama server over plain HTTP
+# using httpx, already listed above.
 
 # Dev / test / packaging
 pytest==8.3.5
-pyinstaller
+pyinstaller==6.21.0
+pyinstaller-hooks-contrib==2026.6

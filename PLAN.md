@@ -91,6 +91,19 @@ Since treasurers already work in QuickBooks/Excel, the simplest and most reliabl
 - **Hardcoded `INCOME_BUDGET`/`EXPENSE_BUDGET`/`QB_TO_BUDGET_MAP`** — becomes the Excel-template-driven config described above.
 - **`ORG_NAME`, fiscal year, `balance_forward`** — move from notebook variables/hardcoded literals into `config.py`'s `OrgConfig`, editable via the setup wizard/Settings dialog instead of code.
 
+## Future: Treasurer Copilot (LLM, deferred past v1)
+
+Discussed but **not part of Build order phases 1–5 above** — a v2 idea, noted here so it doesn't get lost or accidentally designed into a corner while v1 is being built.
+
+**The idea:** a text chat panel docked beside whatever report is open in the GUI, so a board member can ask plain-English questions ("why is Book Fair over budget?") and get an answer grounded in the data already on screen. See the concept mockup discussed with the user (navy/teal/gold palette pulled directly from `builders.py`'s existing report styling, not a generic chat-UI look) for what this could look like visually.
+
+**Key decisions already made:**
+- **Text, not voice.** Voice adds real complexity (speech-to-text, latency) for little payoff, and it's awkward to dictate financial questions in a shared board setting.
+- **No RAG / vector index.** A single PTA's annual data is a few hundred transactions in small JSON files — that easily fits directly in an LLM's context window. Filtering the relevant month/category and passing that structured slice as context is simpler and more reliable than building an embeddings/chunking/vector-search pipeline to solve a scale problem this product doesn't have.
+- **Deferred past v1 on purpose.** The core app is designed to be a fully local, offline, no-account installable tool (see "Data location"/"Platforms" above) — that's a meaningfully different product shape than one that needs an API key, network calls, and a cost model. Don't let this feature creep into phases 1–5.
+
+**What v1 should still do, to keep this door open cheaply:** keep the JSON history schema (`data/history/{Month}_{Year}.json`) and budget-line naming (`config.py`/`budget_io.py`) consistent and stable — that's the only thing a future copilot would actually depend on, and it costs nothing extra to keep tidy now.
+
 ## Verification
 
 - `pytest` green in the new repo at each phase (ported tests unchanged in behavior; new tests for `budget_io`/`pipeline`).

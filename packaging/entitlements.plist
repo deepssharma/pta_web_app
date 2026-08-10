@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the signed/notarized release build
+  (packaging/build_mac_release.sh / packaging/notarize_mac.sh).
+
+  This is NOT an App Sandbox entitlements file. This app is distributed
+  directly (Developer ID + notarization), not through the Mac App Store,
+  so it isn't sandboxed and doesn't need the restrictive
+  com.apple.security.app-sandbox entitlement or its file-access-scoping
+  companions. These four entitlements exist solely to satisfy Apple's
+  *notarization* requirements for a PyInstaller-frozen Python app, which
+  bundles native C-extension .so/.dylib files (pypdfium2_raw's
+  libpdfium.dylib, PySide6's Qt libraries, etc.) that aren't signed by
+  this app's own Team ID, and whose Python interpreter needs relaxed
+  executable-memory rules to run under the hardened runtime at all.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+</dict>
+</plist>

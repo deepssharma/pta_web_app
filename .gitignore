@@ -10,6 +10,7 @@ logs/
 *.pdf
 *.csv
 .env
+org_config.json
 __pycache__/
 *.pyc
 *.egg-info/
@@ -24,4 +25,12 @@ tests/fixtures/*.csv
 !sample_data/
 !sample_data/**
 
+# Generated example workbooks for the README, built from sample_data/ only.
+!docs/
+!docs/**
+
 .DS_Store
+
+# Personal/local Claude Code settings (machine-specific absolute paths) --
+# not useful to other clones of this repo.
+.claude/settings.local.json

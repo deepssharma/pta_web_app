@@ -29,6 +29,31 @@ Total for Accounting Expense (Quickbooks),,,,,,,,
 
 
 @pytest.fixture
+def sample_qb_csv_with_pass_through(tmp_path):
+    """QuickBooks CSV with a pass-through-fund section (e.g. READTHON),
+    mixed-case on purpose to exercise case-insensitive matching."""
+    content = '''Setauket School PTA
+Transaction Detail by Account
+July 1-31, 2025
+,,,,,,,,
+,,Transaction date,Transaction type,Num,Name,Description,Split,Amount
+Checking (4346),,,,,,,,
+,,07/01/2025,Check,1077,Michelle Schultz,6th Grade Events,Checking,-181.58
+Total for Checking (4346),,,,,,,,
+Accounting Expense (Quickbooks),,,,,,,,
+,,07/17/2025,Expense,,Quickbooks Online,Monthly Fee,Checking,-1257.76
+Total for Accounting Expense (Quickbooks),,,,,,,,
+Readthon,,,,,,,,
+,,07/10/2025,Deposit,,Family A,Readathon pledge,Checking,500.00
+,,07/20/2025,Check,2001,Elementary School,Readathon payout,Checking,-300.00
+Total for Readthon,,,,,,,,
+'''
+    f = tmp_path / 'quickbooks_july_2025.csv'
+    f.write_text(content, encoding='utf-8')
+    return f
+
+
+@pytest.fixture
 def sample_givebacks_csv(tmp_path):
     """Creates a minimal Givebacks CSV for testing."""
     content = '''Item,Categories,No. of Transactions,Total

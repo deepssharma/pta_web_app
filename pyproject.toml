@@ -14,16 +14,33 @@ dependencies = [
     "httpx==0.28.1",
     "PySide6",
     "platformdirs",
+    # credentials.py (OS keychain wrapper, used for the Givebacks
+    # password) is imported unconditionally by settings_dialog.py, so it
+    # must be a core dep, not tucked inside the givebacks extras group,
+    # or the GUI fails to even launch without that extra installed.
+    "keyring==25.7.0",
 ]
+
+[project.scripts]
+pta-treasurer = "pta_treasurer.gui.app:main"
 
 [project.optional-dependencies]
 dev = [
     "pytest==8.3.5",
-    "pyinstaller",
+    "pyinstaller==6.21.0",
+    "pyinstaller-hooks-contrib==2026.6",
 ]
 givebacks = [
-    "playwright==1.48.0",
+    # 1.48.0 pins greenlet==3.1.1 exactly, which has no prebuilt wheel for
+    # this project's Python 3.14 dev environment and fails to build from
+    # source (CPython 3.14 removed the internal field greenlet's C
+    # extension relies on). >=1.50.0 relaxes the greenlet constraint to a
+    # range that resolves to a version with a real 3.14 wheel.
+    "playwright==1.62.0",
 ]
+# No "ai" extras group: the AI Assistant runs against a local Ollama
+# server over plain HTTP (ai_assistant.py), using httpx -- already a
+# core dep -- so no extra package is needed to use it.
 
 [tool.setuptools.packages.find]
 where = ["src"]

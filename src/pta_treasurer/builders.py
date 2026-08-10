@@ -92,7 +92,7 @@ def _total_row(ws, row, label, val):
 
 # ── 1. TREASURER REPORT ───────────────────────────────────────────────────────
 
-def build_treasurer(ws, qb, bank, month_label, org_name):
+def build_treasurer(ws, qb, bank, month_label, org_name, pass_through=None):
     ws.sheet_view.showGridLines = False
     for col, w in zip(['A','B','C','D'], [32,18,18,22]):
         ws.column_dimensions[col].width = w
@@ -157,6 +157,7 @@ def build_treasurer(ws, qb, bank, month_label, org_name):
         ('(-) Fees',                    -bank['total_fees']),
     ]):
         _data_row(ws, row, lbl, amt, shade=(i % 2 == 1)); row += 1
+    ending_bal_row = row
     _total_row(ws, row, 'Ending Balance (per statement)',
                bank['ending_balance']); row += 1
 
@@ -182,6 +183,42 @@ def build_treasurer(ws, qb, bank, month_label, org_name):
         ws.row_dimensions[row].height = 16; row += 1
     row += 1
 
+    if pass_through is not None:
+        fund_name = pass_through['fund_name']
+        row = _sec_hdr(ws, f'{fund_name} (Pass-Through Funds Held for School)', row)
+        row = _col_hdrs(ws, row, ['Description', 'Amount', '', ''])
+        _data_row(ws, row, f'(+) {fund_name} Deposits This Month',
+                  pass_through['income_total']); row += 1
+        _data_row(ws, row, f'(-) {fund_name} Payouts This Month',
+                  -pass_through['expense_total'], shade=True); row += 1
+        readthon_bal_row = row
+        _total_row(ws, row, f'{fund_name} Balance Held in Account (Cumulative)',
+                   pass_through['balance_held']); row += 2
+
+        ws.merge_cells(f'A{row}:D{row}')
+        ws[f'A{row}'].value = 'TOTAL MONEY IN ACCOUNT / PTA MONEY'
+        ws[f'A{row}'].font = Font(name='Arial', bold=True, size=11, color=WHITE)
+        ws[f'A{row}'].fill = NAVY_FILL
+        ws[f'A{row}'].alignment = Alignment(horizontal='left', indent=1)
+        row += 1
+
+        pta_money_val = bank['ending_balance'] - pass_through['balance_held']
+        for lbl, formula, fill in [
+            ('Total Money in Account', f'=B{ending_bal_row}', GOLD_FILL),
+            ('PTA Money', f'=B{ending_bal_row}-B{readthon_bal_row}',
+             RED_FILL if pta_money_val < 0 else GOLD_FILL),
+        ]:
+            for col in ['A','B','C','D']:
+                ws[f'{col}{row}'].fill = fill
+                ws[f'{col}{row}'].border = MED_BORDER
+            ws[f'A{row}'].value = lbl; ws[f'A{row}'].font = TOTAL_FONT
+            ws[f'A{row}'].alignment = Alignment(indent=1)
+            ws[f'B{row}'].value = formula; ws[f'B{row}'].font = TOTAL_FONT
+            ws[f'B{row}'].number_format = MONEY_FMT
+            ws[f'B{row}'].alignment = Alignment(horizontal='right')
+            row += 1
+        row += 1
+
     if bank['daily_balances']:
         row = _sec_hdr(ws, 'DAILY ENDING BALANCES', row)
         for col, hdr in zip(['A','B'], ['Date', 'Balance']):
@@ -206,7 +243,7 @@ def build_treasurer(ws, qb, bank, month_label, org_name):
 # ── 2. BUDGET VS ACTUALS ──────────────────────────────────────────────────────
 
 def build_budget(ws, title, merged_data, org_name, fiscal_months,
-                 current_idx, show_pl=False, income_merged=None):
+                 current_idx, fiscal_year_start, show_pl=False, income_merged=None):
     ws.sheet_view.showGridLines = False
     ws.column_dimensions['A'].width = 28
     ws.column_dimensions['B'].width = 13
@@ -225,7 +262,7 @@ def build_budget(ws, title, merged_data, org_name, fiscal_months,
 
     ws.merge_cells(f'A2:{get_column_letter(17)}2'); c = ws['A2']
     c.value = (f'As of {datetime.today().strftime("%B %d, %Y")}  |  '
-               f'Fiscal Year July 2025 - June 2026  |  '
+               f'Fiscal Year {fiscal_year_start} - {fiscal_year_start + 1}  |  '
                f'Active month: {fiscal_months[current_idx]}')
     c.font = Font(name='Arial', italic=True, size=9, color='666666')
     c.alignment = Alignment(horizontal='center')
@@ -500,8 +537,8 @@ def build_manifest(ws, month_folder, org_name, month_label,
 
 # ── 5. YTD SUMMARY ───────────────────────────────────────────────────────────
 def build_ytd_summary(ws, income_merged, expense_merged, org_name,
-                      month_label, fiscal_idx, fiscal_months,
-                      bank, balance_forward=0.0):
+                      month_label, fiscal_idx, fiscal_months, fiscal_year_start,
+                      bank, balance_forward=0.0, pass_through=None):
     ws.sheet_view.showGridLines = False
     ws.column_dimensions['A'].width = 28
     for col in ['B','C','D','E','F','G','H','I']:
@@ -515,7 +552,8 @@ def build_ytd_summary(ws, income_merged, expense_merged, org_name,
     ws.row_dimensions[1].height = 28
 
     ws.merge_cells('A2:I2'); c = ws['A2']
-    c.value = f'7/1/25 - {datetime.today().strftime("%-m/%-d/%Y")}'
+    c.value = (f'7/1/{fiscal_year_start} - '
+               f'{datetime.today().strftime("%-m/%-d/%Y")}')
     c.font = Font(name='Arial', italic=True, size=10, color='666666')
     c.alignment = Alignment(horizontal='center')
     ws.row_dimensions[2].height = 16
@@ -526,7 +564,7 @@ def build_ytd_summary(ws, income_merged, expense_merged, org_name,
     ws['B3'].value = balance_forward
     ws['B3'].font = BOLD_FONT
     ws['B3'].number_format = MONEY_FMT
-    ws['C3'].value = 'as of 6/30/25'
+    ws['C3'].value = f'as of 6/30/{fiscal_year_start + 1}'
     ws['C3'].font = Font(name='Arial', italic=True, size=9, color='666666')
 
     ws['E3'].value = 'Current Balance:'
@@ -538,6 +576,17 @@ def build_ytd_summary(ws, income_merged, expense_merged, org_name,
                   if bank.get('period') else '')
     ws['G3'].value = f'as of {period_end}'
     ws['G3'].font = Font(name='Arial', italic=True, size=9, color='666666')
+
+    # PTA Money = current balance minus pass-through fund money still held
+    # -- only shown when there's actually some held (nothing to subtract
+    # otherwise, so it would just duplicate Current Balance).
+    if pass_through is not None and pass_through.get('balance_held'):
+        ws['H3'].value = 'PTA Money:'
+        ws['H3'].font = BOLD_FONT
+        ws['I3'].value = bank['ending_balance'] - pass_through['balance_held']
+        ws['I3'].font = BOLD_FONT
+        ws['I3'].number_format = MONEY_FMT
+
     ws.row_dimensions[3].height = 18
 
     # YTD totals
@@ -797,3 +846,284 @@ def build_ytd_summary(ws, income_merged, expense_merged, org_name,
 
         ws.row_dimensions[row].height = 18
         row += 2
+
+
+# ── 6. DEBITS & CREDITS (WHOLE-FISCAL-YEAR LEDGER) ────────────────────────────
+# Shared helpers for wide (5-9 column), month-sectioned ledger sheets - a
+# different shape from the fixed-4-column helpers above (_sec_hdr/_data_row/
+# _total_row), so these get their own small helper set rather than forcing
+# those to fit.
+
+def _wide_hdr_row(ws, row, org_name, title, n_cols):
+    ws.merge_cells(f'A{row}:{get_column_letter(n_cols)}{row}')
+    c = ws[f'A{row}']
+    c.value = f'{org_name.upper()}  -  {title}'
+    c.font = Font(name='Arial', bold=True, size=13, color=WHITE)
+    c.fill = NAVY_FILL
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[row].height = 26
+    return row + 1
+
+
+def _wide_col_hdrs(ws, row, labels):
+    for i, lbl in enumerate(labels):
+        c = ws.cell(row=row, column=i + 1, value=lbl)
+        c.font = SUBHDR_FONT; c.fill = TEAL_FILL; c.border = THIN_BORDER
+        c.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[row].height = 18
+    return row + 1
+
+
+def _month_band(ws, row, month_label, n_cols):
+    ws.merge_cells(f'A{row}:{get_column_letter(n_cols)}{row}')
+    c = ws[f'A{row}']
+    c.value = month_label.split()[0].upper()
+    c.font = Font(name='Arial', bold=True, size=10)
+    c.fill = GOLD_FILL
+    c.alignment = Alignment(horizontal='left', vertical='center', indent=1)
+    ws.row_dimensions[row].height = 16
+    return row + 1
+
+
+def _payout_band(ws, row, label, total, n_cols, amount_col):
+    for i in range(n_cols):
+        c = ws.cell(row=row, column=i + 1)
+        c.fill = LTBLUE_FILL; c.border = THIN_BORDER
+    ws.cell(row=row, column=1, value=label).font = BOLD_FONT
+    ws.cell(row=row, column=1).alignment = Alignment(indent=1)
+    c = ws.cell(row=row, column=amount_col + 1, value=total)
+    c.font = BOLD_FONT; c.number_format = MONEY_FMT
+    c.alignment = Alignment(horizontal='right')
+    ws.row_dimensions[row].height = 16
+    return row + 1
+
+
+def _deposit_band(ws, row, date_str, total, month_short, bank_stmt_short, amount_col):
+    """
+    Header row for a group of same-date Credits rows that together match one
+    confirmed real Chase bank deposit (see build_credits_sheet) - shows the
+    deposit as a single auditable total, with its QuickBooks category
+    breakdown nested underneath via plain _wide_data_row calls.
+    """
+    for i in range(7):
+        c = ws.cell(row=row, column=i + 1)
+        c.fill = LTBLUE_FILL; c.border = THIN_BORDER
+    ws.cell(row=row, column=1, value=date_str).font = BOLD_FONT
+    ws.cell(row=row, column=1).alignment = Alignment(horizontal='left', indent=1)
+    ws.cell(row=row, column=2, value='Bank Deposit').font = BOLD_FONT
+    ws.cell(row=row, column=2).alignment = Alignment(horizontal='center')
+    c = ws.cell(row=row, column=amount_col + 1, value=total)
+    c.font = BOLD_FONT; c.number_format = MONEY_FMT; c.alignment = Alignment(horizontal='right')
+    ws.cell(row=row, column=4, value=month_short).font = BOLD_FONT
+    ws.cell(row=row, column=4).alignment = Alignment(horizontal='center')
+    ws.cell(row=row, column=5, value=bank_stmt_short).font = BOLD_FONT
+    ws.cell(row=row, column=5).alignment = Alignment(horizontal='center')
+    ws.row_dimensions[row].height = 16
+    return row + 1
+
+
+def _wide_data_row(ws, row, values, money_cols=()):
+    for i, val in enumerate(values):
+        c = ws.cell(row=row, column=i + 1, value=val)
+        c.font = BODY_FONT; c.border = THIN_BORDER
+        if i in money_cols:
+            c.number_format = MONEY_FMT
+            c.alignment = Alignment(horizontal='right')
+        elif i == 0:
+            c.alignment = Alignment(horizontal='left', indent=1)
+        else:
+            c.alignment = Alignment(horizontal='center')
+    ws.row_dimensions[row].height = 15
+    return row + 1
+
+
+def _wide_total_row(ws, row, n_cols, label, val, amount_col):
+    for i in range(n_cols):
+        c = ws.cell(row=row, column=i + 1)
+        c.fill = LTBLUE_FILL; c.border = MED_BORDER
+    ws.cell(row=row, column=1, value=label).font = TOTAL_FONT
+    ws.cell(row=row, column=1).alignment = Alignment(indent=1)
+    c = ws.cell(row=row, column=amount_col + 1, value=val)
+    c.font = TOTAL_FONT; c.number_format = MONEY_FMT
+    c.alignment = Alignment(horizontal='right')
+    ws.row_dimensions[row].height = 18
+    return row + 1
+
+
+def _sort_by_date(txns):
+    def key(t):
+        try:
+            return datetime.strptime(t['date'], '%m/%d/%Y')
+        except (ValueError, TypeError):
+            return datetime.min
+    return sorted(txns, key=key)
+
+
+def build_credits_sheet(ws, credits_by_month, org_name, qb_to_budget_map=None):
+    """
+    credits_by_month: list of (month_label, [transaction, ...]) in chronological
+    fiscal-year order. Each transaction is one dict from
+    parsers.parse_quickbooks_detail()['transactions'] where is_income is True.
+
+    Only auto-derivable columns are populated (date, category, amount, month,
+    mapped budget line, running total) - there's no Notes column here because
+    nothing in the parsed data maps to hand-written reconciliation notes.
+
+    A transaction QuickBooks recorded as a literal cash/check bank deposit
+    (raw description 'DEPOSIT' or 'DEPOSIT ID NUMBER ...', not an electronic
+    Givebacks/MemberHub payout) shows 'Bank Deposit (cash/check)' in CATEGORY
+    instead of its QuickBooks category name (e.g. 'Book Fair') - BUDGET LINE
+    still maps from the real category, so the budget rollup is unaffected;
+    only the CATEGORY label changes, to distinguish it from an electronic
+    payout at a glance.
+
+    When several same-date rows together match one confirmed real Chase
+    deposit (parsers.match_credits_to_bank_statement already verified the
+    date-group's total against an actual bank deposit amount - e.g. a single
+    $7,118.12 deposit that QuickBooks split into 'Book Fair' $6,219.40 and
+    'Spiritwear' $898.72), they render as a bold 'Bank Deposit' band showing
+    the real deposit total, with the QuickBooks category breakdown nested
+    underneath - an auditor matching against the Chase statement sees the
+    deposit total first, not two unrelated-looking category rows that
+    silently need to be added together to reconcile. A lone row, or a group
+    that never matched a real bank deposit (bank_statement_month is None -
+    can't claim a grouping that isn't verified), still renders flat as
+    before.
+    """
+    qb_to_budget_map = qb_to_budget_map or {}
+    ws.sheet_view.showGridLines = False
+    for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G'], [14, 30, 14, 10, 16, 26, 16]):
+        ws.column_dimensions[col].width = w
+
+    row = _wide_hdr_row(ws, 1, org_name, 'Credits (Deposits) - Fiscal Year', 7)
+    row += 1
+    row = _wide_col_hdrs(row=row, ws=ws, labels=[
+        'DEPOSIT DATE', 'CATEGORY', '$ AMOUNT', 'MONTH', 'BANK STATEMENT',
+        'BUDGET LINE', 'RUNNING TOTAL'])
+
+    def render_flat_row(t, running):
+        budget_line = qb_to_budget_map.get(t['category'], t['category'])
+        desc = (t.get('description') or '').strip().upper()
+        is_bank_deposit = desc == 'DEPOSIT' or desc.startswith('DEPOSIT ID NUMBER')
+        category_label = 'Bank Deposit (cash/check)' if is_bank_deposit else t['category']
+        bank_stmt = t.get('bank_statement_month')
+        bank_stmt = bank_stmt.split()[0] if bank_stmt else '—'
+        return [t['date'], category_label, t['amount'],
+                month_label.split()[0], bank_stmt, budget_line, running]
+
+    running = 0.0
+    for month_label, txns in credits_by_month:
+        if not txns:
+            continue
+        row = _month_band(ws, row, month_label, n_cols=7)
+
+        by_date = {}
+        for t in _sort_by_date(txns):
+            by_date.setdefault(t['date'], []).append(t)
+
+        for date_str, group in by_date.items():
+            bank_stmt_val = group[0].get('bank_statement_month')
+            if len(group) > 1 and bank_stmt_val:
+                deposit_total = round(sum(t['amount'] for t in group), 2)
+                row = _deposit_band(ws, row, date_str, deposit_total,
+                                     month_label.split()[0], bank_stmt_val.split()[0],
+                                     amount_col=2)
+                for t in group:
+                    running += t['amount']
+                    budget_line = qb_to_budget_map.get(t['category'], t['category'])
+                    row = _wide_data_row(ws, row, [
+                        None, t['category'], t['amount'], None, None, budget_line, running,
+                    ], money_cols={2, 6})
+            else:
+                for t in group:
+                    running += t['amount']
+                    row = _wide_data_row(ws, row, render_flat_row(t, running), money_cols={2, 6})
+
+    row = _wide_total_row(ws, row, 7, 'TOTAL CREDITS', running, amount_col=2)
+    return row
+
+
+def build_debits_sheet(ws, debits_by_month, org_name, qb_to_budget_map=None):
+    """
+    debits_by_month: list of (month_label, [transaction, ...]) in chronological
+    fiscal-year order. Each transaction is one dict from
+    parsers.parse_quickbooks_detail()['transactions'] where is_income is False.
+
+    NOTES column is intentionally left blank - the source data has no field
+    for hand-written reconciliation notes (e.g. "check was signed late",
+    explanations for corrections); fill those in by hand after generating.
+    """
+    qb_to_budget_map = qb_to_budget_map or {}
+    ws.sheet_view.showGridLines = False
+    for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'],
+                       [10, 12, 22, 26, 12, 10, 16, 22, 24]):
+        ws.column_dimensions[col].width = w
+
+    row = _wide_hdr_row(ws, 1, org_name, 'Debits (Checks/Expenses) - Fiscal Year', 9)
+    row += 1
+    row = _wide_col_hdrs(row=row, ws=ws, labels=[
+        'CHECK #', 'DATE', 'PAYEE', 'CATEGORY', '$ AMOUNT',
+        'MONTH', 'BANK STATEMENT', 'BUDGET LINE', 'NOTES'])
+    # Running total lives in a 10th column, added after NOTES so a blank
+    # Notes cell doesn't visually break the money column next to it.
+    ws.cell(row=row - 1, column=10, value='RUNNING TOTAL').font = SUBHDR_FONT
+    ws.cell(row=row - 1, column=10).fill = TEAL_FILL
+    ws.cell(row=row - 1, column=10).border = THIN_BORDER
+    ws.cell(row=row - 1, column=10).alignment = Alignment(horizontal='center', vertical='center')
+    ws.column_dimensions['J'].width = 16
+
+    running = 0.0
+    for month_label, txns in debits_by_month:
+        if not txns:
+            continue
+        row = _month_band(ws, row, month_label, n_cols=10)
+        for t in _sort_by_date(txns):
+            running += t['amount']
+            budget_line = qb_to_budget_map.get(t['category'], t['category'])
+            bank_stmt = t.get('bank_statement_month')
+            bank_stmt = bank_stmt.split()[0] if bank_stmt else '—'
+            row = _wide_data_row(ws, row, [
+                t['check_no'], t['date'], t['payee'], t['category'], t['amount'],
+                month_label.split()[0], bank_stmt, budget_line, '', running,
+            ], money_cols={4, 9})
+
+    row = _wide_total_row(ws, row, 10, 'TOTAL DEBITS', running, amount_col=4)
+    return row
+
+
+def build_memberhub_summary_sheet(ws, givebacks_by_month, org_name):
+    """
+    givebacks_by_month: list of (month_label, [payout, ...]) in chronological
+    fiscal-year order. Each payout is a dict {date, total, items} - date is
+    the matched bank deposit date (None if unreconciled - rendered as such,
+    never dropped), items is that one payout file's line items (dicts with
+    item/category/count/total/source_file, from
+    parsers.parse_givebacks_files() called once per payout file). Payouts
+    within a month are sorted by date, unreconciled ones listed last.
+    """
+    ws.sheet_view.showGridLines = False
+    for col, w in zip(['A', 'B', 'C', 'D'], [30, 24, 14, 16]):
+        ws.column_dimensions[col].width = w
+
+    row = _wide_hdr_row(ws, 1, org_name, 'MemberHub / Givebacks Summary - Fiscal Year', 4)
+    row += 1
+    row = _wide_col_hdrs(row=row, ws=ws, labels=[
+        'ITEM', 'CATEGORY', '$ AMOUNT', 'RUNNING TOTAL'])
+
+    running = 0.0
+    for month_label, payouts in givebacks_by_month:
+        if not payouts:
+            continue
+        row = _month_band(ws, row, month_label, n_cols=4)
+        sorted_payouts = sorted(payouts, key=lambda p: (p['date'] is None, p['date'] or ''))
+        for payout in sorted_payouts:
+            label = f"Payout — {payout['date']}" if payout['date'] else 'Payout — (date not reconciled)'
+            row = _payout_band(ws, row, label, payout['total'], n_cols=4, amount_col=2)
+            for it in payout['items']:
+                running += it['total']
+                row = _wide_data_row(ws, row, [
+                    it['item'], it['category'], it['total'], running,
+                ], money_cols={2, 3})
+
+    row = _wide_total_row(ws, row, 4, 'TOTAL GIVEBACKS', running, amount_col=2)
+    return row
