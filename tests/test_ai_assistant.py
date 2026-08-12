@@ -11,8 +11,9 @@ import json
 from pathlib import Path
 
 from pta_treasurer.ai_assistant import (
-    build_error_context, build_messages, build_report_context,
-    is_ollama_available, list_ollama_models,
+    build_budget_context, build_error_context, build_messages,
+    build_report_context, is_ollama_available, list_ollama_models,
+    parse_edit_action,
 )
 from pta_treasurer.pipeline import RunResult
 
@@ -165,3 +166,87 @@ def test_is_ollama_available_false_when_unreachable():
 
 def test_list_ollama_models_empty_when_unreachable():
     assert list_ollama_models('http://localhost:1') == []
+
+
+# ── build_budget_context ────────────────────────────────────────────────
+
+def test_build_budget_context_shows_sections_items_and_budget():
+    income_budget = {'Fundraising': {'Book Fair': (9118.36, 500.0)}}
+    expense_budget = {'Admin': {'Bank Services': (234.94, 200.0)}}
+    context = build_budget_context(income_budget, expense_budget)
+    assert context == {
+        'income_budget': {'Fundraising': {'Book Fair': {'this_year_budget': 500.0}}},
+        'expense_budget': {'Admin': {'Bank Services': {'this_year_budget': 200.0}}},
+    }
+
+
+def test_build_budget_context_excludes_last_year_actual():
+    # Only this year's budget belongs in the edit-mode context -- last
+    # year's actual isn't relevant to composing a structural edit, and
+    # keeping the prompt small matters more for a local model.
+    income_budget = {'Fundraising': {'Book Fair': (9118.36, 500.0)}}
+    context = build_budget_context(income_budget, {})
+    assert '9118.36' not in json.dumps(context)
+
+
+# ── parse_edit_action ──────────────────────────────────────────────────────
+
+def test_parse_edit_action_add_item_happy_path():
+    raw = ('{"action": "add_item", "sheet": "Expense Budget", '
+           '"section": "Programs", "item": "Robotics Club", '
+           '"qb_names": ["Robotics"], "budget": 500.0}')
+    action = parse_edit_action(raw)
+    assert action == {
+        'action': 'add_item', 'sheet': 'Expense Budget', 'section': 'Programs',
+        'item': 'Robotics Club', 'qb_names': ['Robotics'], 'budget': 500.0,
+    }
+
+
+def test_parse_edit_action_strips_markdown_fence():
+    raw = '```json\n{"action": "remove_item", "sheet": "Income Budget", "item": "Plant Sale"}\n```'
+    action = parse_edit_action(raw)
+    assert action == {'action': 'remove_item', 'sheet': 'Income Budget', 'item': 'Plant Sale'}
+
+
+def test_parse_edit_action_strips_leading_and_trailing_commentary():
+    raw = 'Sure, here you go:\n{"action": "set_budget_amount", "sheet": "Expense Budget", "item": "Accounting", "amount": 800.0}\nLet me know if that works.'
+    action = parse_edit_action(raw)
+    assert action['action'] == 'set_budget_amount'
+    assert action['amount'] == 800.0
+
+
+def test_parse_edit_action_clarify_passthrough():
+    raw = '{"action": "clarify", "message": "Which section should this go in?"}'
+    action = parse_edit_action(raw)
+    assert action == {'action': 'clarify', 'message': 'Which section should this go in?'}
+
+
+def test_parse_edit_action_invalid_json_becomes_clarify():
+    action = parse_edit_action('not json at all')
+    assert action['action'] == 'clarify'
+    assert 'message' in action
+
+
+def test_parse_edit_action_unknown_action_name_becomes_clarify():
+    action = parse_edit_action('{"action": "delete_everything", "item": "x"}')
+    assert action['action'] == 'clarify'
+    assert 'delete_everything' in action['message']
+
+
+def test_parse_edit_action_missing_required_key_becomes_clarify():
+    action = parse_edit_action('{"action": "move_item", "sheet": "Income Budget", "item": "Plant Sale"}')
+    assert action['action'] == 'clarify'
+    assert 'to_section' in action['message']
+
+
+def test_parse_edit_action_bad_sheet_value_becomes_clarify():
+    action = parse_edit_action('{"action": "remove_item", "sheet": "Income", "item": "Plant Sale"}')
+    assert action['action'] == 'clarify'
+
+
+def test_parse_edit_action_never_raises_on_garbage():
+    # A malformed/hallucinated response must never propagate as an
+    # exception -- it always degrades to a clarify action instead.
+    for garbage in ('', '{{{', '[]', 'null', '{"action": null}', '{"no_action_key": true}'):
+        action = parse_edit_action(garbage)
+        assert action['action'] == 'clarify'

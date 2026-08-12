@@ -274,7 +274,7 @@ class MainWindow(QMainWindow):
         central.setLayout(layout)
         self.setCentralWidget(central)
 
-        self.chat_panel = ChatPanel(self.config)
+        self.chat_panel = ChatPanel(self.config, self.data_dir)
         self.chat_panel.open_settings_requested.connect(self._open_settings)
         self.chat_dock = QDockWidget('AI Assistant', self)
         self.chat_dock.setWidget(self.chat_panel)

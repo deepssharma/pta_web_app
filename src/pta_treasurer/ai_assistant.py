@@ -40,6 +40,45 @@ SYSTEM_PROMPT_TROUBLESHOOT = (
     'be corrected. Be concise.'
 )
 
+# Every action's required keys must match _ALLOWED_EDIT_ACTIONS below --
+# keep the two in sync if this prompt's schema ever changes.
+SYSTEM_PROMPT_EDIT_BUDGET = (
+    'You are a helpful assistant for a PTA/school treasurer using the '
+    'pta-treasurer app, translating one plain-English request into a '
+    'single structured budget-config edit. You are given the current '
+    'budget structure (JSON: sections -> items -> this year\'s budget '
+    'amount) and a request. Respond with ONLY a single JSON object, no '
+    'other text, no markdown code fences, matching exactly one of these '
+    'shapes:\n'
+    '{"action": "add_item", "sheet": "Income Budget"|"Expense Budget", '
+    '"section": "...", "item": "...", "qb_names": ["..."], "budget": 0.0}\n'
+    '{"action": "remove_item", "sheet": "...", "item": "..."}\n'
+    '{"action": "move_item", "sheet": "...", "item": "...", "to_section": "..."}\n'
+    '{"action": "rename_item", "sheet": "...", "old_name": "...", "new_name": "..."}\n'
+    '{"action": "map_qb_category", "sheet": "...", "item": "...", "qb_name": "..."}\n'
+    '{"action": "set_budget_amount", "sheet": "...", "item": "...", "amount": 0.0}\n'
+    'If the request is ambiguous, refers to an item or section not '
+    'present in the given structure, or does not clearly match exactly '
+    'one of these actions, respond instead with '
+    '{"action": "clarify", "message": "..."} explaining in plain '
+    'language what you need to know. "sheet" must be exactly '
+    '"Income Budget" or "Expense Budget", never anything else or '
+    'abbreviated. Never invent a dollar amount the user did not give '
+    'you -- ask via "clarify" instead of guessing.'
+)
+
+# action -> required keys (besides "action" itself). Mirrors the schema in
+# SYSTEM_PROMPT_EDIT_BUDGET -- update both together.
+_ALLOWED_EDIT_ACTIONS = {
+    'add_item':          {'sheet', 'section', 'item'},
+    'remove_item':       {'sheet', 'item'},
+    'move_item':         {'sheet', 'item', 'to_section'},
+    'rename_item':       {'sheet', 'old_name', 'new_name'},
+    'map_qb_category':   {'sheet', 'item', 'qb_name'},
+    'set_budget_amount': {'sheet', 'item', 'amount'},
+    'clarify':           {'message'},
+}
+
 
 def _budget_vs_actual(merged: dict, fiscal_idx: int | None) -> dict:
     out = {}
@@ -89,6 +128,69 @@ def build_error_context(error_message: str) -> dict:
     return {'error_message': str(error_message)}
 
 
+def build_budget_context(income_budget: dict, expense_budget: dict) -> dict:
+    """Pure. Compact view of the current budget.xlsx structure -- sections,
+    items, and this year's budget amount, no actuals -- for the
+    edit_budget LLM mode. Deliberately smaller than build_report_context
+    since a local model does better with a tight prompt, and structural
+    edits don't need actuals to be decided (the remove_item safety check
+    is enforced in code afterward, not by the model)."""
+    def _view(budget_dict):
+        return {
+            section: {item: {'this_year_budget': budget}
+                       for item, (_last_yr, budget) in items.items()}
+            for section, items in budget_dict.items()
+        }
+    return {'income_budget': _view(income_budget), 'expense_budget': _view(expense_budget)}
+
+
+def parse_edit_action(raw_text: str) -> dict:
+    """Pure. Extracts and validates a single structured edit action from
+    the LLM's raw edit_budget response. Never raises -- anything that
+    isn't parseable JSON, names an unknown action, or is missing a
+    required key becomes {'action': 'clarify', 'message': ...} instead,
+    so a malformed or hallucinated response can never reach budget_io.py
+    as a write."""
+    text = raw_text.strip()
+    if text.startswith('```'):
+        text = text[3:]
+        if text.startswith('json'):
+            text = text[4:]
+        text = text.rsplit('```', 1)[0].strip()
+
+    start, end = text.find('{'), text.rfind('}')
+    if start == -1 or end == -1 or end < start:
+        return {'action': 'clarify',
+                'message': f"I couldn't turn that into a specific edit. "
+                           f"Raw response: {raw_text[:200]}"}
+    try:
+        parsed = json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return {'action': 'clarify',
+                'message': f"I couldn't turn that into a specific edit. "
+                           f"Raw response: {raw_text[:200]}"}
+
+    if not isinstance(parsed, dict):
+        return {'action': 'clarify',
+                'message': "I couldn't turn that into a specific edit."}
+
+    action = parsed.get('action')
+    required = _ALLOWED_EDIT_ACTIONS.get(action)
+    if required is None:
+        return {'action': 'clarify',
+                'message': f"I couldn't turn that into a specific edit "
+                           f"(unrecognized action {action!r})."}
+    missing = required - parsed.keys()
+    if missing:
+        return {'action': 'clarify',
+                'message': f"That edit is missing: {', '.join(sorted(missing))}."}
+    if action != 'clarify' and parsed.get('sheet') not in ('Income Budget', 'Expense Budget'):
+        return {'action': 'clarify',
+                'message': 'That edit needs to say whether it applies to '
+                            'Income Budget or Expense Budget.'}
+    return parsed
+
+
 def build_messages(context: dict, question: str, history: list[dict] | None = None) -> list[dict]:
     """Pure. Assembles the chat `messages` list (role/content dicts --
     same shape Ollama's /api/chat expects)."""
@@ -127,7 +229,10 @@ def ask(question: str, context: dict, mode: str, host: str, model: str,
     httpx.HTTPError (connection refused, timeout, bad model name, etc.)
     on failure -- ChatWorker turns that into a plain FAILED line in the
     transcript, no crash."""
-    system_prompt = SYSTEM_PROMPT_TROUBLESHOOT if mode == 'troubleshoot' else SYSTEM_PROMPT_REPORT
+    system_prompt = {
+        'troubleshoot': SYSTEM_PROMPT_TROUBLESHOOT,
+        'edit_budget': SYSTEM_PROMPT_EDIT_BUDGET,
+    }.get(mode, SYSTEM_PROMPT_REPORT)
     messages = [{'role': 'system', 'content': system_prompt}] + build_messages(context, question, history)
 
     response = httpx.post(

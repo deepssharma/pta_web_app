@@ -104,6 +104,42 @@ Discussed but **not part of Build order phases 1–5 above** — a v2 idea, note
 
 **What v1 should still do, to keep this door open cheaply:** keep the JSON history schema (`data/history/{Month}_{Year}.json`) and budget-line naming (`config.py`/`budget_io.py`) consistent and stable — that's the only thing a future copilot would actually depend on, and it costs nothing extra to keep tidy now.
 
+## Future: agent-driven budget edits (write mode) — Tier 1 + Tier 2 built 2026-08-12
+
+Both tiers below are now implemented (`budget_io.py`'s six write functions
++ `apply_edit`/`describe_edit`, `ai_assistant.py`'s `edit_budget` mode +
+`parse_edit_action`, `chat_panel.py`'s Apply/Discard preview flow) and
+covered by tests; live-verified against a real local `llama3.2` model,
+not just mocks. See the `ai_assistant.py`/`chat_panel.py` entries in
+`CLAUDE.md`'s Architecture section for the current shape. Kept below as
+the original design rationale.
+
+Extends the read-only Copilot idea above to the question that actually prompted it: *if a treasurer tells an agent "add a category," "remove one," or "move Book Fair under Programs instead of Fundraising," can it just do that?*
+
+**Yes, technically — if `budget_io.py` exposes edits as a handful of structured functions, and no agent (in-app or external) ever touches the Excel template or the Python code directly:**
+
+```python
+budget_io.add_item(section, item, last_year_actual=0.0, budget=0.0, qb_names=[])
+budget_io.remove_item(item)                             # refuses if the item has nonzero actuals this FY, unless force=True
+budget_io.move_item(item, from_section, to_section)      # the "nest it under something else" case — pure re-key, no data at risk
+budget_io.rename_item(old_name, new_name)                # keeps QB_TO_BUDGET_MAP pointed at the renamed item
+budget_io.map_qb_category(qb_name, budget_item)          # "QuickBooks changed a category's name" case
+budget_io.set_budget_amount(item, new_amount)
+```
+
+Any agent can drive these — an in-app copilot (below), or a general coding agent (Claude Code/Desktop) pointed straight at the user's data folder, no different from how categories get edited in `pta_treasurer` today, in this very session.
+
+**Two ways this could ship, not mutually exclusive:**
+1. **Bring-your-own-agent — effectively free, v1-compatible.** Once `budget_io.py` exists (Build order Phase 1) with clear function signatures/docstrings, a treasurer who already has a coding agent can point it at `~/Documents/PTA Treasurer/` and ask for the edit directly. No GUI work required beyond Phase 1 as already planned.
+2. **In-app copilot, write mode — v2, extends the deferred Copilot idea.** The docked chat panel (above) gets write access to the same six functions, gated behind a **preview-diff-then-confirm** step (show old vs. new state, require an explicit "Apply"). This is the piece that reintroduces the API-key/network tradeoff the v1 design deliberately avoids (see "Deferred past v1 on purpose" above), so it inherits the same deferral — just scoped concretely now instead of hand-waved.
+
+**Guardrails either way:**
+- All writes go through the structured functions only — never a raw file or code edit by the agent — so a bad LLM guess can't corrupt the template's shape.
+- `remove_item`/`rename_item` check the fiscal year's actuals first and refuse/warn rather than silently dropping real transaction history from the budget view.
+- Auto-backup the previous template before any agent-driven write (a dated copy or `.bak`), mirroring the undo-via-git safety net this repo already has.
+
+Not deciding now — this is the sketch, per your ask. Say the word if you want tier 1, tier 2, both, or neither turned into actual Build-order phases.
+
 ## Verification
 
 - `pytest` green in the new repo at each phase (ported tests unchanged in behavior; new tests for `budget_io`/`pipeline`).
