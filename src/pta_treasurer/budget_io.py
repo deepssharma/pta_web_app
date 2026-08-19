@@ -362,6 +362,26 @@ def map_qb_category(path: Path, sheet: str, item: str, qb_name: str) -> None:
     wb.save(path)
 
 
+def unmap_qb_category(path: Path, sheet: str, item: str, qb_name: str) -> None:
+    """Removes qb_name from item's comma-separated QuickBooks Category
+    Name(s) list, if present -- the counterpart to map_qb_category, for
+    moving a QuickBooks category that's currently routed to the wrong
+    budget line. Silently no-ops if qb_name isn't currently mapped to
+    item."""
+    _validate_sheet(sheet)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[sheet]
+    row_idx = _find_item_row(ws, item)
+    if row_idx is None:
+        raise ValueError(f"'{item}' not found in {sheet}.")
+    cell = ws.cell(row=row_idx, column=3)
+    existing = [n.strip() for n in str(cell.value or '').split(',') if n.strip()]
+    existing = [n for n in existing if n != qb_name]
+    cell.value = ', '.join(existing)
+    _backup(path)
+    wb.save(path)
+
+
 def set_budget_amount(path: Path, sheet: str, item: str, amount: float) -> None:
     """Updates an item's This Year Budget figure."""
     _validate_sheet(sheet)

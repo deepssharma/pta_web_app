@@ -21,7 +21,7 @@ from pta_treasurer.budget_io import (
 from pta_treasurer.builders import (
     FISCAL_MONTHS, build_budget, build_credits_sheet, build_debits_sheet,
     build_givebacks, build_manifest, build_memberhub_summary_sheet,
-    build_treasurer, build_ytd_summary,
+    build_treasurer, build_ytd_summary, build_ytd_summary_compact,
 )
 from pta_treasurer.config import (
     MONTH_NAMES, OrgConfig, detect_month_from_filename, detect_month_from_pdf,
@@ -46,6 +46,35 @@ from pta_treasurer.parsers import (
 # FY2025-26 stops being anyone's "last year".
 _JULY_2026_SPILLOVER_PRIOR_FY_START = 2025
 _JULY_2026_SPILLOVER_EXCLUDED_ITEMS = {'Accounting Quickbooks'}
+
+# One-time correction: QuickBooks recorded a single $901.00 raw '5th grade
+# T-shirts' category for October 2025, but it actually covered two separate
+# real orders -- a $125.00 staff order and a $776.00 grade order. A raw QB
+# category can only route to one budget line via qb_to_budget_map, so this
+# splits the raw actual itself (fiscal_index 3 = October) before anything
+# downstream maps or sums it. Only applies to FY2025-26's own raw actuals
+# (as the current fiscal year, or as the prior fiscal year for a FY2026-27
+# report's "Last Year Actual"); inert for every other fiscal year, and safe
+# to delete once no longer relevant.
+_OCT_2025_TSHIRT_STAFF_SPLIT = 125.00
+
+
+def _apply_oct_2025_tshirt_split(expense_actuals: dict, fiscal_year_start: int) -> dict:
+    if fiscal_year_start != 2025:
+        return expense_actuals
+    raw = expense_actuals.get('5th grade T-shirts')
+    if not raw or not raw[3]:
+        return expense_actuals
+    expense_actuals = dict(expense_actuals)
+
+    grade_monthly = list(raw)
+    grade_monthly[3] = round(grade_monthly[3] - _OCT_2025_TSHIRT_STAFF_SPLIT, 2)
+    expense_actuals['5th grade T-shirts'] = grade_monthly
+
+    staff_monthly = list(expense_actuals.get('5th Staff T-Shirts', [0.0] * 12))
+    staff_monthly[3] = round(staff_monthly[3] + _OCT_2025_TSHIRT_STAFF_SPLIT, 2)
+    expense_actuals['5th Staff T-Shirts'] = staff_monthly
+    return expense_actuals
 
 
 @dataclass
@@ -328,10 +357,12 @@ def run_month(config: OrgConfig, data_dir: Path, month: str, year: str) -> RunRe
 
     income_actuals, expense_actuals = load_all_actuals(
         data_dir, fiscal_year_start=target_fy_start)
+    expense_actuals = _apply_oct_2025_tshirt_split(expense_actuals, target_fy_start)
     target_expense_mapped = map_actuals_to_budget_items(expense_actuals, qb_to_budget_map)
 
     prior_income_actuals, prior_expense_actuals = load_all_actuals(
         data_dir, fiscal_year_start=prior_fy_start)
+    prior_expense_actuals = _apply_oct_2025_tshirt_split(prior_expense_actuals, prior_fy_start)
     prior_income_mapped = map_actuals_to_budget_items(prior_income_actuals, qb_to_budget_map)
     prior_expense_mapped = map_actuals_to_budget_items(prior_expense_actuals, qb_to_budget_map)
 
@@ -370,31 +401,35 @@ def run_month(config: OrgConfig, data_dir: Path, month: str, year: str) -> RunRe
     ws1.title = 'Treasurer Report'
     build_treasurer(ws1, qb, bank, month_label, config.org_name, pass_through=pass_through)
 
-    ws2 = wb.create_sheet('Income Budget vs Actuals')
-    build_budget(ws2, 'Budget vs Actuals - Income', income_merged,
-                 config.org_name, FISCAL_MONTHS, fiscal_idx, target_fy_start, show_pl=False)
-
-    ws3 = wb.create_sheet('Expense Budget vs Actuals')
-    build_budget(ws3, 'Budget vs Actuals - Expenses', expense_merged,
-                 config.org_name, FISCAL_MONTHS, fiscal_idx, target_fy_start,
-                 show_pl=True, income_merged=income_merged)
-
-    ws4 = wb.create_sheet('Giveback Reconciliation')
-    build_givebacks(ws4, givebacks, bank, config.org_name)
-
-    ws5 = wb.create_sheet('File Manifest')
-    build_manifest(ws5, month_folder, config.org_name, month_label, fiscal_idx, FISCAL_MONTHS)
-
     balance_forward, balance_forward_warning = get_fiscal_year_balance_forward(
         config, data_dir, target_fy_start, month_label, bank)
     if balance_forward_warning:
         warnings.append(balance_forward_warning)
 
-    ws6 = wb.create_sheet('YTD Summary')
-    build_ytd_summary(ws6, income_merged, expense_merged, config.org_name,
-                       month_label, fiscal_idx, FISCAL_MONTHS, target_fy_start,
-                       bank=bank, balance_forward=balance_forward,
-                       pass_through=pass_through)
+    # YTD Summary comes right after the Treasurer Report -- the overview a
+    # treasurer wants first -- rather than last among the tabs. The compact
+    # (5-column) layout is the default; build_ytd_summary (the original
+    # 9-column version) stays available for on-demand/programmatic use.
+    ws2 = wb.create_sheet('YTD Summary')
+    build_ytd_summary_compact(ws2, income_merged, expense_merged, config.org_name,
+                               month_label, fiscal_idx, FISCAL_MONTHS, target_fy_start,
+                               bank=bank, balance_forward=balance_forward,
+                               pass_through=pass_through)
+
+    ws3 = wb.create_sheet('Income Budget vs Actuals')
+    build_budget(ws3, 'Budget vs Actuals - Income', income_merged,
+                 config.org_name, FISCAL_MONTHS, fiscal_idx, target_fy_start, show_pl=False)
+
+    ws4 = wb.create_sheet('Expense Budget vs Actuals')
+    build_budget(ws4, 'Budget vs Actuals - Expenses', expense_merged,
+                 config.org_name, FISCAL_MONTHS, fiscal_idx, target_fy_start,
+                 show_pl=True, income_merged=income_merged)
+
+    ws5 = wb.create_sheet('Giveback Reconciliation')
+    build_givebacks(ws5, givebacks, bank, config.org_name)
+
+    ws6 = wb.create_sheet('File Manifest')
+    build_manifest(ws6, month_folder, config.org_name, month_label, fiscal_idx, FISCAL_MONTHS)
 
     output_dir = data_dir / 'output'
     output_dir.mkdir(parents=True, exist_ok=True)

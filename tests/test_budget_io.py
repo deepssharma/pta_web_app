@@ -8,7 +8,7 @@ from pta_treasurer.budget_io import (
     SHEET_NAMES, actuals_total_for_item, add_item, apply_dynamic_last_year,
     apply_edit, describe_edit, generate_template, load_budget,
     map_actuals_to_budget_items, map_qb_category, merge_actuals_into_budget,
-    move_item, remove_item, rename_item, set_budget_amount,
+    move_item, remove_item, rename_item, set_budget_amount, unmap_qb_category,
 )
 
 
@@ -329,6 +329,37 @@ def test_map_qb_category_is_idempotent(tmp_path):
     wb = openpyxl.load_workbook(path)
     row = next(r for r in wb['Expense Budget'].iter_rows(min_row=3, values_only=True) if r[1] == 'Accounting')
     assert row[2] == 'Accounting Expense (Quickbooks)'
+
+
+def test_unmap_qb_category_removes_from_list(tmp_path):
+    path = _budget_path(tmp_path, expense_rows=[
+        ('Admin', 'Accounting', 'Accounting Expense (Quickbooks), QB Fees', 650.0, 650.0),
+    ])
+    unmap_qb_category(path, 'Expense Budget', 'Accounting', 'QB Fees')
+    _, _, qb_map = load_budget(path)
+    assert qb_map == {'Accounting Expense (Quickbooks)': 'Accounting'}
+
+
+def test_unmap_qb_category_moving_between_items(tmp_path):
+    # The real-world case this exists for: a QB category was mapped to
+    # the wrong budget item and needs to move to the right one.
+    path = _budget_path(tmp_path, expense_rows=[
+        ('Donations', 'Staff Shirts', '5th grade T-shirts', 191.78, 125.0),
+        ('Grad Class Activities', 'Grade T-Shirts', '', 1494.25, 800.0),
+    ])
+    unmap_qb_category(path, 'Expense Budget', 'Staff Shirts', '5th grade T-shirts')
+    map_qb_category(path, 'Expense Budget', 'Grade T-Shirts', '5th grade T-shirts')
+    _, _, qb_map = load_budget(path)
+    assert qb_map == {'5th grade T-shirts': 'Grade T-Shirts'}
+
+
+def test_unmap_qb_category_noop_when_not_present(tmp_path):
+    path = _budget_path(tmp_path, expense_rows=[
+        ('Admin', 'Accounting', 'Accounting Expense (Quickbooks)', 650.0, 650.0),
+    ])
+    unmap_qb_category(path, 'Expense Budget', 'Accounting', 'Nonexistent Category')
+    _, _, qb_map = load_budget(path)
+    assert qb_map == {'Accounting Expense (Quickbooks)': 'Accounting'}
 
 
 def test_set_budget_amount_updates_this_year_column(tmp_path):

@@ -13,9 +13,9 @@ import pytest
 from pta_treasurer.budget_io import generate_template
 from pta_treasurer.config import OrgConfig, fiscal_year_start_calendar_year
 from pta_treasurer.pipeline import (
-    build_debits_credits_ledger, compute_pass_through_balance_held,
-    get_fiscal_year_balance_forward, list_available_fiscal_years,
-    load_all_actuals, run_month,
+    _apply_oct_2025_tshirt_split, build_debits_credits_ledger,
+    compute_pass_through_balance_held, get_fiscal_year_balance_forward,
+    list_available_fiscal_years, load_all_actuals, run_month,
 )
 
 SAMPLE_DATA = Path(__file__).parent.parent / 'sample_data' / 'July_1999'
@@ -51,8 +51,8 @@ def test_run_month_produces_workbook_with_six_tabs(data_dir, config):
 
     wb = openpyxl.load_workbook(result.output_path)
     assert wb.sheetnames == [
-        'Treasurer Report', 'Income Budget vs Actuals', 'Expense Budget vs Actuals',
-        'Giveback Reconciliation', 'File Manifest', 'YTD Summary',
+        'Treasurer Report', 'YTD Summary', 'Income Budget vs Actuals',
+        'Expense Budget vs Actuals', 'Giveback Reconciliation', 'File Manifest',
     ]
 
 
@@ -242,6 +242,42 @@ def test_run_month_spillover_does_not_apply_to_other_fiscal_years(data_dir, conf
     result = run_month(config, data_dir, 'July', '1999')
     expense = result.expense_merged.get('Program Expense', {})
     assert expense.get('Picnic', (0.0,))[0] == 0.0
+
+
+# ── Tests for _apply_oct_2025_tshirt_split ──────────────────────────────────
+
+def test_apply_oct_2025_tshirt_split_moves_125_to_staff_line():
+    actuals = {'5th grade T-shirts': [0.0] * 3 + [901.0] + [0.0] * 8}
+    result = _apply_oct_2025_tshirt_split(actuals, fiscal_year_start=2025)
+    assert result['5th grade T-shirts'][3] == pytest.approx(776.0)
+    assert result['5th Staff T-Shirts'][3] == pytest.approx(125.0)
+
+
+def test_apply_oct_2025_tshirt_split_adds_to_existing_staff_actual():
+    actuals = {
+        '5th grade T-shirts': [0.0] * 3 + [901.0] + [0.0] * 8,
+        '5th Staff T-Shirts': [0.0] * 3 + [66.78] + [0.0] * 8,
+    }
+    result = _apply_oct_2025_tshirt_split(actuals, fiscal_year_start=2025)
+    assert result['5th Staff T-Shirts'][3] == pytest.approx(66.78 + 125.0)
+
+
+def test_apply_oct_2025_tshirt_split_inert_for_other_fiscal_years():
+    actuals = {'5th grade T-shirts': [0.0] * 3 + [901.0] + [0.0] * 8}
+    result = _apply_oct_2025_tshirt_split(actuals, fiscal_year_start=2026)
+    assert result == actuals
+
+
+def test_apply_oct_2025_tshirt_split_noop_when_no_october_actual():
+    actuals = {'5th grade T-shirts': [0.0] * 12}
+    result = _apply_oct_2025_tshirt_split(actuals, fiscal_year_start=2025)
+    assert result == actuals
+
+
+def test_apply_oct_2025_tshirt_split_noop_when_category_absent():
+    actuals = {'Some Other Category': [10.0] * 12}
+    result = _apply_oct_2025_tshirt_split(actuals, fiscal_year_start=2025)
+    assert result == actuals
 
 
 # ── Tests for get_fiscal_year_balance_forward ───────────────────────────────

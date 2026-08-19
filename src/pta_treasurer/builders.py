@@ -34,6 +34,14 @@ THIN        = Side(style='thin',   color='AAAAAA')
 MED         = Side(style='medium', color=NAVY)
 THIN_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 MED_BORDER  = Border(left=MED,  right=MED,  top=MED,  bottom=MED)
+
+# Brackets a variable-length group of rows (e.g. a Credits-sheet "Bank
+# Deposit" band plus its nested category breakdown) with a bold outer
+# border and thin seams between rows inside it, so the group reads as
+# one unit rather than a run of ordinary transaction rows.
+GROUP_TOP_BORDER  = Border(left=MED, right=MED, top=MED,  bottom=THIN)
+GROUP_MID_BORDER  = Border(left=MED, right=MED, top=THIN, bottom=THIN)
+GROUP_LAST_BORDER = Border(left=MED, right=MED, top=THIN, bottom=MED)
 MONEY_FMT   = '$#,##0.00_);($#,##0.00)'
 
 FISCAL_MONTHS = ['JULY','AUG','SEPT','OCT','NOV','DEC',
@@ -445,10 +453,14 @@ def build_givebacks(ws, givebacks, bank, org_name):
 
     _sec_hdr(ws, 'GIVEBACK <-> BANK RECONCILIATION', row, n=6); row += 1
     gb_total = sum(g['total'] for g in givebacks)
-    bank_gb  = next(
-        (d['amount'] for d in bank['deposits']
-         if 'gb payout' in d.get('description','').lower()
-         or 'givebacks' in d.get('description','').lower()), 0.0)
+    # A month can have more than one GB Payout deposit clear separately
+    # (e.g. two payouts landing days apart) -- sum all matches, not just
+    # the first one, or a real second deposit gets silently dropped and
+    # shows as a false unreconciled "Difference".
+    bank_gb  = sum(
+        d['amount'] for d in bank['deposits']
+        if 'gb payout' in d.get('description','').lower()
+        or 'givebacks' in d.get('description','').lower())
 
     for lbl, val in [
         ('Givebacks Platform Total',            gb_total),
@@ -848,6 +860,309 @@ def build_ytd_summary(ws, income_merged, expense_merged, org_name,
         row += 2
 
 
+def build_ytd_summary_compact(ws, income_merged, expense_merged, org_name,
+                               month_label, fiscal_idx, fiscal_months,
+                               fiscal_year_start, bank, balance_forward=0.0,
+                               pass_through=None):
+    """
+    Compact YTD Summary: 5 columns (Category, Budget, Actual, Last Year,
+    Profit/Loss) instead of build_ytd_summary's 9. A category with both
+    an income and an expense side (e.g. Book Fair) renders as two rows --
+    "<item> — Income" / "<item> — Expense" -- rather than cramming two
+    numbers into one cell, so every Budget/Actual/Last Year cell stays a
+    real, summable number (a single cell can't hold two numbers and still
+    work in an Excel SUM() the way a treasurer select-and-totaling a
+    column would expect). Section TOTAL rows are the one exception --
+    those are synthetic aggregates already, so their Budget/Actual/Last
+    Year cells show combined "$income / $expense" text since nothing
+    above them depends on summing a TOTAL row further.
+
+    build_ytd_summary (the original 9-column version) is kept as-is,
+    still fully working, for on-demand use whenever the regular version
+    is asked for specifically -- not called by the default pipeline, but
+    not deleted either.
+
+    balance_forward: caller is expected to have already subtracted the
+    pass-through balance held AS OF the fiscal year's own July 1 (not
+    today's cumulative figure) -- see pipeline.get_fiscal_year_balance_forward,
+    which already does this. Current Balance is computed here directly,
+    since this function already has both bank and pass_through in hand.
+    """
+    ws.sheet_view.showGridLines = False
+    ws.column_dimensions['A'].width = 32
+    for col in ['B', 'C', 'D', 'E']:
+        ws.column_dimensions[col].width = 18
+
+    ws.merge_cells('A1:E1'); c = ws['A1']
+    c.value = f"{org_name}  —  Treasurer's Report"
+    c.font = Font(name='Arial', bold=True, size=14, color=NAVY)
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 28
+
+    ws.merge_cells('A2:E2'); c = ws['A2']
+    c.value = (f'7/1/{fiscal_year_start} - '
+               f'{datetime.today().strftime("%-m/%-d/%Y")}')
+    c.font = Font(name='Arial', italic=True, size=10, color='666666')
+    c.alignment = Alignment(horizontal='center')
+    ws.row_dimensions[2].height = 16
+
+    # Both figures reflect PTA money -- net of any pass-through fund
+    # balance held in the account -- rather than the raw bank balance, so
+    # this row can't be misread as "how much cash is in the account" when
+    # part of that cash isn't really the org's.
+    pass_through_balance_held = pass_through['balance_held'] if pass_through else 0.0
+    current_balance = bank['ending_balance'] - pass_through_balance_held
+
+    ws['A3'].value = 'Balance Forward (PTA):'
+    ws['A3'].font = BOLD_FONT
+    ws['B3'].value = balance_forward
+    ws['B3'].font = BOLD_FONT
+    ws['B3'].number_format = MONEY_FMT
+
+    ws['D3'].value = 'Current Balance (PTA):'
+    ws['D3'].font = BOLD_FONT
+    ws['E3'].value = current_balance
+    ws['E3'].font = BOLD_FONT
+    ws['E3'].number_format = MONEY_FMT
+    ws.row_dimensions[3].height = 18
+
+    ytd_inc = sum(sum(monthly[:fiscal_idx+1])
+                  for section in income_merged.values()
+                  for _, (_, _, monthly) in section.items())
+    ytd_exp = sum(sum(monthly[:fiscal_idx+1])
+                  for section in expense_merged.values()
+                  for _, (_, _, monthly) in section.items())
+    ws['A4'].value = (f'Total Income: ${ytd_inc:,.2f}   |   '
+                       f'Total Expenses: ${ytd_exp:,.2f}   |   '
+                       f'Net: ${ytd_inc - ytd_exp:,.2f}')
+    ws['A4'].font = BOLD_FONT
+    ws.row_dimensions[4].height = 18
+
+    income_lookup = {}
+    for section, items in income_merged.items():
+        for item, (last_yr, budget, monthly) in items.items():
+            income_lookup[item.lower()] = (last_yr, budget, monthly)
+
+    expense_lookup = {}
+    for section, items in expense_merged.items():
+        for item, (last_yr, budget, monthly) in items.items():
+            expense_lookup[item.lower()] = (last_yr, budget, monthly)
+
+    section_items = {}
+    for section, items in expense_merged.items():
+        section_items[section] = {}
+        for item, (last_yr_exp, exp_budget, exp_monthly) in items.items():
+            inc_data    = income_lookup.get(item.lower())
+            last_yr_inc = inc_data[0] if inc_data else 0.0
+            inc_budget  = inc_data[1] if inc_data else 0.0
+            inc_monthly = inc_data[2] if inc_data else [0.0]*12
+            section_items[section][item] = {
+                'last_yr_inc':  last_yr_inc,
+                'last_yr_exp':  last_yr_exp,
+                'exp_budget':   exp_budget,
+                'inc_budget':   inc_budget,
+                'act_income':   sum(inc_monthly[:fiscal_idx+1]),
+                'act_expenses': sum(exp_monthly[:fiscal_idx+1]),
+            }
+
+    MERGE_PAIRS = {
+        'membership expenses': {
+            # Just "Membership" here (unlike build_ytd_summary's fuller
+            # "Membership Expenses/Income") -- the compact sheet already
+            # splits this into separate Income/Expense rows, so repeating
+            # both words in the label is redundant.
+            'label':        'Membership',
+            'income_keys':  ['single', 'family', 'donations', 'teachers', 'student'],
+            'expense_keys': ['membership expenses', 'council dues'],
+        },
+        'entertainment': {
+            'label':        'Basket Dinner',
+            'income_keys':  ['ticket & raffle sales', 'sponsors'],
+            'expense_keys': ['entertainment', 'raffles', 'venue'],
+        },
+    }
+    all_merged_income_keys  = set()
+    all_merged_expense_keys = set()
+    for merge in MERGE_PAIRS.values():
+        all_merged_income_keys.update(merge['income_keys'])
+        all_merged_expense_keys.update(merge.get('expense_keys', []))
+
+    other_income = {}
+    for section, items in income_merged.items():
+        for item, (last_yr_inc, inc_budget, inc_monthly) in items.items():
+            if item.lower() not in expense_lookup and item.lower() not in all_merged_income_keys:
+                other_income[item] = {
+                    'last_yr_inc':  last_yr_inc,
+                    'last_yr_exp':  0.0,
+                    'exp_budget':   0.0,
+                    'inc_budget':   inc_budget,
+                    'act_income':   sum(inc_monthly[:fiscal_idx+1]),
+                    'act_expenses': 0.0,
+                }
+    if other_income:
+        section_items['Other Income'] = other_income
+
+    def has_val(*vals):
+        return any(abs(v) > 0.001 for v in vals)
+
+    def money_or_dash(val):
+        if val is None or abs(val) < 0.001:
+            return '--'
+        return val
+
+    def combo_text(inc, exp):
+        if abs(inc) < 0.001 and abs(exp) < 0.001:
+            return '--'
+        if abs(inc) < 0.001:
+            return f'${exp:,.2f}'
+        if abs(exp) < 0.001:
+            return f'${inc:,.2f}'
+        return f'${inc:,.2f} / ${exp:,.2f}'
+
+    def sec_hdr(label, r):
+        ws.merge_cells(f'A{r}:E{r}')
+        c = ws[f'A{r}']; c.value = label
+        c.font = Font(name='Arial', bold=True, size=11, color=WHITE)
+        c.fill = NAVY_FILL
+        c.alignment = Alignment(horizontal='left', vertical='center', indent=1)
+        ws.row_dimensions[r].height = 20
+        return r + 1
+
+    def col_hdrs(r):
+        for ci, hdr in enumerate([
+            'Category', 'Budget (Income/Expense)', 'Actual (Income/Expense)',
+            'Last Year (Income/Expense)', 'Profit/Loss',
+        ], 1):
+            c = ws.cell(row=r, column=ci, value=hdr)
+            c.font = Font(name='Arial', bold=True, size=9, color=WHITE)
+            c.fill = TEAL_FILL; c.border = THIN_BORDER
+            c.alignment = Alignment(horizontal='center' if ci > 1 else 'left',
+                                     vertical='center', wrap_text=True)
+        ws.row_dimensions[r].height = 26
+        return r + 1
+
+    # A dual-sided item (e.g. Book Fair) renders as two rows -- this pair
+    # of borders draws a bracket around them (medium navy on the outer
+    # edges, thin on the seam between the two), so the pair visually
+    # reads as one unit without merging cells or losing per-row numbers.
+    PAIR_TOP_BORDER    = Border(left=MED, right=MED, top=MED, bottom=THIN)
+    PAIR_BOTTOM_BORDER = Border(left=MED, right=MED, top=THIN, bottom=MED)
+    SUBLABEL_FONT  = Font(name='Arial', size=10, italic=True, color='666666')
+    # Last Year is reference/historical, not this year's actionable
+    # numbers -- greyed + italic so the eye lands on Budget/Actual/
+    # Profit-Loss first.
+    LASTYEAR_FONT       = Font(name='Arial', size=10, italic=True, color='808080')
+    LASTYEAR_TOTAL_FONT = Font(name='Arial', size=10, italic=True, color='808080', bold=True)
+
+    def render_row(r, fill, label, budget, actual, last_yr, profit_loss,
+                    highlight=None, border=THIN_BORDER, label_font=None, indent=2):
+        for ci, val in enumerate(
+                [label, money_or_dash(budget), money_or_dash(actual),
+                 money_or_dash(last_yr), money_or_dash(profit_loss)], 1):
+            c = ws.cell(row=r, column=ci, value=val)
+            if ci == 1:
+                c.font = label_font if label_font else BODY_FONT
+            elif ci == 4:
+                c.font = LASTYEAR_FONT
+            else:
+                c.font = BODY_FONT
+            c.fill = fill; c.border = border
+            if ci == 1:
+                c.alignment = Alignment(indent=indent)
+            else:
+                c.number_format = MONEY_FMT
+                c.alignment = Alignment(horizontal='right')
+        if highlight is not None:
+            ws.cell(row=r, column=5).fill = GREEN_FILL if highlight >= 0 else RED_FILL
+
+    row = 6
+    row = col_hdrs(row)
+
+    for section_name, items in section_items.items():
+        if not items:
+            continue
+        row = sec_hdr(section_name, row)
+        sec = defaultdict(float)
+        i = 0
+
+        for item, vals in items.items():
+            item_lower = item.lower()
+            if item_lower in all_merged_expense_keys and item_lower not in MERGE_PAIRS:
+                continue
+
+            if item_lower in MERGE_PAIRS:
+                merge = MERGE_PAIRS[item_lower]
+                display_label = merge['label']
+                display_vals = {
+                    'last_yr_inc': sum(income_lookup[k][0] for k in merge['income_keys'] if k in income_lookup),
+                    'last_yr_exp': sum(expense_lookup[k][0] for k in merge.get('expense_keys', []) if k in expense_lookup),
+                    'inc_budget':  sum(income_lookup[k][1] for k in merge['income_keys'] if k in income_lookup),
+                    'exp_budget':  sum(expense_lookup[k][1] for k in merge.get('expense_keys', []) if k in expense_lookup),
+                    'act_income':  sum(sum(income_lookup[k][2][:fiscal_idx+1]) for k in merge['income_keys'] if k in income_lookup),
+                    'act_expenses': sum(sum(expense_lookup[k][2][:fiscal_idx+1]) for k in merge.get('expense_keys', []) if k in expense_lookup),
+                }
+            else:
+                display_label = item
+                display_vals  = vals
+
+            has_income  = has_val(display_vals['last_yr_inc'], display_vals['inc_budget'], display_vals['act_income'])
+            has_expense = has_val(display_vals['last_yr_exp'], display_vals['exp_budget'], display_vals['act_expenses'])
+            if not has_income and not has_expense:
+                continue
+
+            net = display_vals['act_income'] - display_vals['act_expenses']
+            fill = LGREY_FILL if i % 2 == 1 else PatternFill()
+            has_actuals = bool(display_vals['act_income'] or display_vals['act_expenses'])
+
+            if has_income and has_expense:
+                render_row(row, fill, f'{display_label} (Income)',
+                           display_vals['inc_budget'], display_vals['act_income'], display_vals['last_yr_inc'], None,
+                           border=PAIR_TOP_BORDER)
+                row += 1
+                render_row(row, fill, 'Expense',
+                           display_vals['exp_budget'], display_vals['act_expenses'], display_vals['last_yr_exp'],
+                           net, highlight=net if has_actuals else None,
+                           border=PAIR_BOTTOM_BORDER, label_font=SUBLABEL_FONT, indent=4)
+                row += 1
+            elif has_income:
+                render_row(row, fill, f'{display_label} (Income)',
+                           display_vals['inc_budget'], display_vals['act_income'], display_vals['last_yr_inc'],
+                           net, highlight=net if has_actuals else None)
+                row += 1
+            else:
+                render_row(row, fill, display_label,
+                           display_vals['exp_budget'], display_vals['act_expenses'], display_vals['last_yr_exp'],
+                           net, highlight=net if has_actuals else None)
+                row += 1
+
+            i += 1
+            for k in ['last_yr_inc', 'last_yr_exp', 'inc_budget', 'exp_budget', 'act_income', 'act_expenses']:
+                sec[k] += display_vals[k]
+
+        sec_net = sec['act_income'] - sec['act_expenses']
+
+        for ci in range(1, 6):
+            ws.cell(row=row, column=ci).fill = LTBLUE_FILL
+            ws.cell(row=row, column=ci).border = MED_BORDER
+        ws.cell(row=row, column=1, value='TOTAL:').font = TOTAL_FONT
+        ws.cell(row=row, column=1).alignment = Alignment(indent=1)
+        for ci, val in [
+            (2, combo_text(sec['inc_budget'], sec['exp_budget'])),
+            (3, combo_text(sec['act_income'], sec['act_expenses'])),
+            (4, combo_text(sec['last_yr_inc'], sec['last_yr_exp'])),
+            (5, money_or_dash(sec_net)),
+        ]:
+            c = ws.cell(row=row, column=ci, value=val)
+            c.font = LASTYEAR_TOTAL_FONT if ci == 4 else TOTAL_FONT
+            if ci == 5:
+                c.number_format = MONEY_FMT
+                if sec['act_income'] or sec['act_expenses']:
+                    c.fill = GREEN_FILL if sec_net >= 0 else RED_FILL
+            c.alignment = Alignment(horizontal='right')
+        ws.row_dimensions[row].height = 18
+        row += 2
+
+
 # ── 6. DEBITS & CREDITS (WHOLE-FISCAL-YEAR LEDGER) ────────────────────────────
 # Shared helpers for wide (5-9 column), month-sectioned ledger sheets - a
 # different shape from the fixed-4-column helpers above (_sec_hdr/_data_row/
@@ -903,29 +1218,33 @@ def _deposit_band(ws, row, date_str, total, month_short, bank_stmt_short, amount
     Header row for a group of same-date Credits rows that together match one
     confirmed real Chase bank deposit (see build_credits_sheet) - shows the
     deposit as a single auditable total, with its QuickBooks category
-    breakdown nested underneath via plain _wide_data_row calls.
+    breakdown (and each line's payee) nested underneath via plain
+    _wide_data_row calls. PAYEE is left blank on the band row itself since
+    a single bank deposit can combine lines from different payers - see
+    each nested row for who each portion came from.
     """
-    for i in range(7):
+    for i in range(8):
         c = ws.cell(row=row, column=i + 1)
-        c.fill = LTBLUE_FILL; c.border = THIN_BORDER
+        c.fill = LTBLUE_FILL; c.border = GROUP_TOP_BORDER
     ws.cell(row=row, column=1, value=date_str).font = BOLD_FONT
     ws.cell(row=row, column=1).alignment = Alignment(horizontal='left', indent=1)
-    ws.cell(row=row, column=2, value='Bank Deposit').font = BOLD_FONT
-    ws.cell(row=row, column=2).alignment = Alignment(horizontal='center')
+    ws.cell(row=row, column=3, value='Bank Deposit').font = BOLD_FONT
+    ws.cell(row=row, column=3).alignment = Alignment(horizontal='center')
     c = ws.cell(row=row, column=amount_col + 1, value=total)
     c.font = BOLD_FONT; c.number_format = MONEY_FMT; c.alignment = Alignment(horizontal='right')
-    ws.cell(row=row, column=4, value=month_short).font = BOLD_FONT
-    ws.cell(row=row, column=4).alignment = Alignment(horizontal='center')
-    ws.cell(row=row, column=5, value=bank_stmt_short).font = BOLD_FONT
+    ws.cell(row=row, column=5, value=month_short).font = BOLD_FONT
     ws.cell(row=row, column=5).alignment = Alignment(horizontal='center')
+    ws.cell(row=row, column=6, value=bank_stmt_short).font = BOLD_FONT
+    ws.cell(row=row, column=6).alignment = Alignment(horizontal='center')
     ws.row_dimensions[row].height = 16
     return row + 1
 
 
-def _wide_data_row(ws, row, values, money_cols=()):
+def _wide_data_row(ws, row, values, money_cols=(), border=None):
+    border = border or THIN_BORDER
     for i, val in enumerate(values):
         c = ws.cell(row=row, column=i + 1, value=val)
-        c.font = BODY_FONT; c.border = THIN_BORDER
+        c.font = BODY_FONT; c.border = border
         if i in money_cols:
             c.number_format = MONEY_FMT
             c.alignment = Alignment(horizontal='right')
@@ -965,9 +1284,14 @@ def build_credits_sheet(ws, credits_by_month, org_name, qb_to_budget_map=None):
     fiscal-year order. Each transaction is one dict from
     parsers.parse_quickbooks_detail()['transactions'] where is_income is True.
 
-    Only auto-derivable columns are populated (date, category, amount, month,
-    mapped budget line, running total) - there's no Notes column here because
-    nothing in the parsed data maps to hand-written reconciliation notes.
+    Only auto-derivable columns are populated (date, payee, category, amount,
+    month, mapped budget line, running total) - there's no Notes column here
+    because nothing in the parsed data maps to hand-written reconciliation
+    notes. PAYEE comes straight from QuickBooks' own Name field (parsers.py)
+    - often blank for electronic Givebacks/MemberHub payouts (no individual
+    payer recorded), populated for a check or a named cash/check deposit -
+    included so an auditor can see who a given line came from without
+    cross-referencing QuickBooks by hand.
 
     A transaction QuickBooks recorded as a literal cash/check bank deposit
     (raw description 'DEPOSIT' or 'DEPOSIT ID NUMBER ...', not an electronic
@@ -982,23 +1306,27 @@ def build_credits_sheet(ws, credits_by_month, org_name, qb_to_budget_map=None):
     date-group's total against an actual bank deposit amount - e.g. a single
     $7,118.12 deposit that QuickBooks split into 'Book Fair' $6,219.40 and
     'Spiritwear' $898.72), they render as a bold 'Bank Deposit' band showing
-    the real deposit total, with the QuickBooks category breakdown nested
-    underneath - an auditor matching against the Chase statement sees the
-    deposit total first, not two unrelated-looking category rows that
-    silently need to be added together to reconcile. A lone row, or a group
-    that never matched a real bank deposit (bank_statement_month is None -
-    can't claim a grouping that isn't verified), still renders flat as
-    before.
+    the real deposit total, with the QuickBooks category breakdown (and each
+    line's own payee) nested underneath - an auditor matching against the
+    Chase statement sees the deposit total first, not two unrelated-looking
+    category rows that silently need to be added together to reconcile. The
+    whole group (band + its nested rows) is bracketed with a bold outer
+    border and thin seams between rows inside it, so it visually reads as
+    one deposit, not a run of ordinary transaction rows that happen to
+    follow each other. A lone row, or a group that never matched a real
+    bank deposit (bank_statement_month is None - can't claim a grouping
+    that isn't verified), still renders flat as before.
     """
     qb_to_budget_map = qb_to_budget_map or {}
     ws.sheet_view.showGridLines = False
-    for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G'], [14, 30, 14, 10, 16, 26, 16]):
+    for col, w in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'],
+                       [14, 22, 24, 14, 10, 16, 22, 16]):
         ws.column_dimensions[col].width = w
 
-    row = _wide_hdr_row(ws, 1, org_name, 'Credits (Deposits) - Fiscal Year', 7)
+    row = _wide_hdr_row(ws, 1, org_name, 'Credits (Deposits) - Fiscal Year', 8)
     row += 1
     row = _wide_col_hdrs(row=row, ws=ws, labels=[
-        'DEPOSIT DATE', 'CATEGORY', '$ AMOUNT', 'MONTH', 'BANK STATEMENT',
+        'DEPOSIT DATE', 'PAYEE', 'CATEGORY', '$ AMOUNT', 'MONTH', 'BANK STATEMENT',
         'BUDGET LINE', 'RUNNING TOTAL'])
 
     def render_flat_row(t, running):
@@ -1008,14 +1336,14 @@ def build_credits_sheet(ws, credits_by_month, org_name, qb_to_budget_map=None):
         category_label = 'Bank Deposit (cash/check)' if is_bank_deposit else t['category']
         bank_stmt = t.get('bank_statement_month')
         bank_stmt = bank_stmt.split()[0] if bank_stmt else '—'
-        return [t['date'], category_label, t['amount'],
+        return [t['date'], t.get('payee', ''), category_label, t['amount'],
                 month_label.split()[0], bank_stmt, budget_line, running]
 
     running = 0.0
     for month_label, txns in credits_by_month:
         if not txns:
             continue
-        row = _month_band(ws, row, month_label, n_cols=7)
+        row = _month_band(ws, row, month_label, n_cols=8)
 
         by_date = {}
         for t in _sort_by_date(txns):
@@ -1027,19 +1355,21 @@ def build_credits_sheet(ws, credits_by_month, org_name, qb_to_budget_map=None):
                 deposit_total = round(sum(t['amount'] for t in group), 2)
                 row = _deposit_band(ws, row, date_str, deposit_total,
                                      month_label.split()[0], bank_stmt_val.split()[0],
-                                     amount_col=2)
-                for t in group:
+                                     amount_col=3)
+                for i, t in enumerate(group):
                     running += t['amount']
                     budget_line = qb_to_budget_map.get(t['category'], t['category'])
+                    border = GROUP_LAST_BORDER if i == len(group) - 1 else GROUP_MID_BORDER
                     row = _wide_data_row(ws, row, [
-                        None, t['category'], t['amount'], None, None, budget_line, running,
-                    ], money_cols={2, 6})
+                        None, t.get('payee', ''), t['category'], t['amount'], None, None,
+                        budget_line, running,
+                    ], money_cols={3, 7}, border=border)
             else:
                 for t in group:
                     running += t['amount']
-                    row = _wide_data_row(ws, row, render_flat_row(t, running), money_cols={2, 6})
+                    row = _wide_data_row(ws, row, render_flat_row(t, running), money_cols={3, 7})
 
-    row = _wide_total_row(ws, row, 7, 'TOTAL CREDITS', running, amount_col=2)
+    row = _wide_total_row(ws, row, 8, 'TOTAL CREDITS', running, amount_col=3)
     return row
 
 

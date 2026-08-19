@@ -5,7 +5,8 @@ Uses mock data — no real files needed.
 import pytest
 import openpyxl
 from pta_treasurer.builders import (build_treasurer, build_budget, build_givebacks,
-                      build_manifest, build_ytd_summary, FISCAL_MONTHS, GOLD_FILL, RED_FILL,
+                      build_manifest, build_ytd_summary, build_ytd_summary_compact,
+                      FISCAL_MONTHS, GOLD_FILL, RED_FILL,
                       build_credits_sheet, build_debits_sheet, build_memberhub_summary_sheet)
 
 
@@ -205,6 +206,104 @@ def test_build_ytd_summary_pass_through_nonzero_balance_shows_pta_money(sample_m
     assert ws['I3'].value == MOCK_BANK['ending_balance'] - MOCK_PASS_THROUGH['balance_held']
 
 
+# ── YTD Summary (compact) tests ─────────────────────────────────────────────
+# (ported from the private notebook, where this replaced build_ytd_summary
+# as the default pipeline tab -- commit "Fix Giveback Reconciliation
+# dropping multi-deposit months; other fixes")
+
+def test_build_ytd_summary_compact_title_and_dates(sample_merged_income, sample_merged_expense):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    build_ytd_summary_compact(ws, sample_merged_income, sample_merged_expense, 'Test PTA',
+                               'July 2026', 0, FISCAL_MONTHS, 2026, bank=MOCK_BANK)
+    assert "Test PTA" in ws['A1'].value
+    assert '7/1/2026' in ws['A2'].value
+
+
+def test_build_ytd_summary_compact_balance_labels_and_values(sample_merged_income, sample_merged_expense):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    build_ytd_summary_compact(ws, sample_merged_income, sample_merged_expense, 'Test PTA',
+                               'July 2025', 0, FISCAL_MONTHS, 2025,
+                               bank=MOCK_BANK, balance_forward=1000.0)
+    assert ws['A3'].value == 'Balance Forward (PTA):'
+    assert ws['B3'].value == 1000.0
+    assert ws['D3'].value == 'Current Balance (PTA):'
+    assert ws['E3'].value == MOCK_BANK['ending_balance']
+
+
+def test_build_ytd_summary_compact_current_balance_subtracts_pass_through(sample_merged_income, sample_merged_expense):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    build_ytd_summary_compact(ws, sample_merged_income, sample_merged_expense, 'Test PTA',
+                               'July 2025', 0, FISCAL_MONTHS, 2025,
+                               bank=MOCK_BANK, pass_through=MOCK_PASS_THROUGH)
+    assert ws['E3'].value == MOCK_BANK['ending_balance'] - MOCK_PASS_THROUGH['balance_held']
+
+
+def test_build_ytd_summary_compact_dual_item_renders_income_and_expense_rows():
+    # An item present on both sides (e.g. Book Fair, which has both ticket
+    # sales income and event costs) must render as two bracketed rows, not
+    # cram two numbers into one cell.
+    income_merged = {'Fundraising': {'Book Fair': (500.0, 1000.0, [200.0] + [0.0]*11)}}
+    expense_merged = {'Fundraising': {'Book Fair': (300.0, 400.0, [150.0] + [0.0]*11)}}
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    build_ytd_summary_compact(ws, income_merged, expense_merged, 'Test PTA',
+                               'July 2025', 0, FISCAL_MONTHS, 2025, bank=MOCK_BANK)
+    labels = [row[0] for row in ws.iter_rows(values_only=True) if row[0]]
+    assert 'Book Fair (Income)' in labels
+    assert 'Expense' in labels
+
+
+def test_build_ytd_summary_compact_income_only_item_single_row():
+    income_merged = {'Fundraising': {'Spiritwear': (100.0, 200.0, [50.0] + [0.0]*11)}}
+    expense_merged = {'Fundraising': {}}
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    build_ytd_summary_compact(ws, income_merged, expense_merged, 'Test PTA',
+                               'July 2025', 0, FISCAL_MONTHS, 2025, bank=MOCK_BANK)
+    labels = [row[0] for row in ws.iter_rows(values_only=True) if row[0]]
+    assert 'Spiritwear (Income)' in labels
+    assert 'Expense' not in labels
+
+
+def test_build_ytd_summary_compact_expense_only_item_single_row():
+    income_merged = {'Admin/General': {}}
+    expense_merged = {'Admin/General': {'Bank Services': (50.0, 200.0, [30.5] + [0.0]*11)}}
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    build_ytd_summary_compact(ws, income_merged, expense_merged, 'Test PTA',
+                               'July 2025', 0, FISCAL_MONTHS, 2025, bank=MOCK_BANK)
+    rows = {row[0]: row for row in ws.iter_rows(values_only=True) if row[0] == 'Bank Services'}
+    assert 'Bank Services' in rows
+
+
+def test_build_ytd_summary_compact_section_total_combines_income_and_expense():
+    income_merged = {'Fundraising': {'Book Fair': (0.0, 1000.0, [200.0] + [0.0]*11)}}
+    expense_merged = {'Fundraising': {'Book Fair': (0.0, 400.0, [150.0] + [0.0]*11)}}
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    build_ytd_summary_compact(ws, income_merged, expense_merged, 'Test PTA',
+                               'July 2025', 0, FISCAL_MONTHS, 2025, bank=MOCK_BANK)
+    total_rows = [row for row in ws.iter_rows(values_only=True) if row[0] == 'TOTAL:']
+    assert len(total_rows) == 1
+    # Budget column combines both sides as "$income / $expense" text
+    assert total_rows[0][1] == '$1,000.00 / $400.00'
+
+
+def test_build_ytd_summary_compact_five_columns_only(sample_merged_income, sample_merged_expense):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    build_ytd_summary_compact(ws, sample_merged_income, sample_merged_expense, 'Test PTA',
+                               'July 2025', 0, FISCAL_MONTHS, 2025, bank=MOCK_BANK)
+    header_row = [row for row in ws.iter_rows(values_only=True) if row[0] == 'Category'][0]
+    assert header_row[:5] == (
+        'Category', 'Budget (Income/Expense)', 'Actual (Income/Expense)',
+        'Last Year (Income/Expense)', 'Profit/Loss',
+    )
+
+
 # ── Budget sheet tests ────────────────────────────────────────────────────────
 
 def test_build_budget_income(sample_merged_income):
@@ -277,6 +376,27 @@ def test_build_givebacks_item_count():
     assert items_found == 2
 
 
+def test_build_givebacks_sums_multiple_matching_bank_deposits():
+    # A month can have more than one GB Payout deposit clear separately --
+    # the bank-side reconciliation total must sum all matches, not stop at
+    # the first one (previously used next(), silently dropping the rest).
+    bank = {**MOCK_BANK, 'deposits': [
+        {'date': '06/05', 'amount': 77.61, 'description': 'GB Payout'},
+        {'date': '06/12', 'amount': 7.59, 'description': 'Givebacks Payout'},
+    ]}
+    givebacks = [
+        {'item': 'Book Fair', 'category': 'Fundraising',
+         'count': 1, 'total': 85.20, 'source_file': 'givebacks_june.csv'},
+    ]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    build_givebacks(ws, givebacks, bank, 'Test PTA')
+    reconciliation = {row[0]: row[3] for row in ws.iter_rows(values_only=True)
+                       if row[0] in ('Givebacks Deposit in Bank Statement', 'Difference')}
+    assert reconciliation['Givebacks Deposit in Bank Statement'] == pytest.approx(85.20)
+    assert reconciliation['Difference'] == pytest.approx(0.0)
+
+
 # ── Fiscal months constants test ──────────────────────────────────────────────
 
 def test_fiscal_months_count():
@@ -318,7 +438,7 @@ def test_build_credits_sheet_running_total():
     ws = wb.active
     build_credits_sheet(ws, MOCK_CREDITS_BY_MONTH, 'Test PTA', MOCK_QB_TO_BUDGET_MAP)
     rows = _cell_values(ws)
-    amounts = [r[6] for r in rows if isinstance(r[0], str) and '/' in str(r[0])]
+    amounts = [r[7] for r in rows if isinstance(r[0], str) and '/' in str(r[0])]
     assert amounts == [110.14, 160.14]  # cumulative across months
 
 
@@ -336,8 +456,19 @@ def test_build_credits_sheet_budget_line_mapping():
     ws = wb.active
     build_credits_sheet(ws, MOCK_CREDITS_BY_MONTH, 'Test PTA', MOCK_QB_TO_BUDGET_MAP)
     rows = _cell_values(ws)
-    budget_lines = [r[5] for r in rows if isinstance(r[0], str) and '/' in str(r[0])]
+    budget_lines = [r[6] for r in rows if isinstance(r[0], str) and '/' in str(r[0])]
     assert budget_lines == ['Membership Income', 'Book Fair']  # mapped / falls back to raw category
+
+
+def test_build_credits_sheet_shows_payee():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    build_credits_sheet(ws, MOCK_CREDITS_BY_MONTH, 'Test PTA')
+    rows = _cell_values(ws)
+    header = [r for r in rows if r[0] == 'DEPOSIT DATE'][0]
+    assert header[1] == 'PAYEE'
+    payees = [r[1] for r in rows if isinstance(r[0], str) and '/' in str(r[0])]
+    assert payees == ['MemberHub', 'MemberHub']
 
 
 def test_build_credits_sheet_total_row():
@@ -347,7 +478,7 @@ def test_build_credits_sheet_total_row():
     rows = _cell_values(ws)
     total_rows = [r for r in rows if r[0] == 'TOTAL CREDITS']
     assert len(total_rows) == 1
-    assert total_rows[0][2] == 160.14
+    assert total_rows[0][3] == 160.14
 
 
 def test_build_credits_sheet_bank_statement_column():
@@ -356,8 +487,8 @@ def test_build_credits_sheet_bank_statement_column():
     build_credits_sheet(ws, MOCK_CREDITS_BY_MONTH, 'Test PTA')
     rows = _cell_values(ws)
     header = [r for r in rows if r[0] == 'DEPOSIT DATE'][0]
-    assert header[4] == 'BANK STATEMENT'
-    bank_stmts = [r[4] for r in rows if isinstance(r[0], str) and '/' in str(r[0])]
+    assert header[5] == 'BANK STATEMENT'
+    bank_stmts = [r[5] for r in rows if isinstance(r[0], str) and '/' in str(r[0])]
     assert bank_stmts == ['August', 'August']  # July txn lagged into August's statement
 
 
@@ -382,13 +513,13 @@ def test_build_credits_sheet_labels_raw_bank_deposits():
     rows = _cell_values(ws)
     data_rows = {r[0]: r for r in rows if isinstance(r[0], str) and '/' in str(r[0])}
     # both raw cash/check deposits show the generic category label...
-    assert data_rows['09/24/2025'][1] == 'Bank Deposit (cash/check)'
-    assert data_rows['09/12/2025'][1] == 'Bank Deposit (cash/check)'
+    assert data_rows['09/24/2025'][2] == 'Bank Deposit (cash/check)'
+    assert data_rows['09/12/2025'][2] == 'Bank Deposit (cash/check)'
     # ...but keep their real budget line
-    assert data_rows['09/24/2025'][5] == 'Book Fair'
-    assert data_rows['09/12/2025'][5] == 'Holiday Boutique'
+    assert data_rows['09/24/2025'][6] == 'Book Fair'
+    assert data_rows['09/12/2025'][6] == 'Holiday Boutique'
     # a Givebacks-sourced row is untouched
-    assert data_rows['09/19/2025'][1] == 'MemberHub/Givebacks Deposit'
+    assert data_rows['09/19/2025'][2] == 'MemberHub/Givebacks Deposit'
 
 
 def test_build_credits_sheet_nests_multi_category_bank_deposit():
@@ -398,7 +529,7 @@ def test_build_credits_sheet_nests_multi_category_bank_deposit():
     # not two unrelated-looking flat rows.
     credits_by_month = [
         ('February 2026', [
-            {'date': '02/27/2026', 'type': 'Deposit', 'check_no': '', 'payee': '',
+            {'date': '02/27/2026', 'type': 'Deposit', 'check_no': '', 'payee': 'Deepali Sharma',
              'description': 'DEPOSIT', 'category': 'Book Fair', 'amount': 6219.40,
              'is_income': True, 'bank_statement_month': 'February 2026'},
             {'date': '02/27/2026', 'type': 'Deposit', 'check_no': '', 'payee': '',
@@ -412,18 +543,57 @@ def test_build_credits_sheet_nests_multi_category_bank_deposit():
                          {'Book Fair': 'Book Fair', 'Spiritwear': 'Spiritwear'})
     rows = _cell_values(ws)
 
-    band_rows = [r for r in rows if r[1] == 'Bank Deposit']
+    band_rows = [r for r in rows if r[2] == 'Bank Deposit']
     assert len(band_rows) == 1
     assert band_rows[0][0] == '02/27/2026'
-    assert round(band_rows[0][2], 2) == 7118.12
+    assert round(band_rows[0][3], 2) == 7118.12
 
-    categories = [r[1] for r in rows if r[1] in ('Book Fair', 'Spiritwear')]
+    nested = [r for r in rows if r[2] in ('Book Fair', 'Spiritwear')]
+    categories = [r[2] for r in nested]
     assert sorted(categories) == ['Book Fair', 'Spiritwear']
-    amounts = sorted(r[2] for r in rows if r[1] in ('Book Fair', 'Spiritwear'))
+    amounts = sorted(r[3] for r in nested)
     assert amounts == [898.72, 6219.40]
+    # each nested row keeps its own payee, distinct from the blank band row
+    payees = {r[2]: r[1] for r in nested}
+    assert payees['Book Fair'] == 'Deepali Sharma'
+    assert payees['Spiritwear'] == ''
     # running total still progresses per underlying category row
-    running_totals = sorted(r[6] for r in rows if r[1] in ('Book Fair', 'Spiritwear'))
+    running_totals = sorted(r[7] for r in nested)
     assert running_totals == [898.72, 7118.12] or running_totals == [6219.40, 7118.12]
+
+
+def test_build_credits_sheet_deposit_group_has_bracket_border():
+    # The band row plus every nested row underneath it should carry a
+    # bold left/right border (GROUP_TOP/MID/LAST_BORDER), and the last
+    # nested row a bold bottom border, so the whole deposit reads as one
+    # bracketed unit rather than blending into ordinary transaction rows.
+    credits_by_month = [
+        ('February 2026', [
+            {'date': '02/27/2026', 'type': 'Deposit', 'check_no': '', 'payee': '',
+             'description': 'DEPOSIT', 'category': 'Book Fair', 'amount': 6219.40,
+             'is_income': True, 'bank_statement_month': 'February 2026'},
+            {'date': '02/27/2026', 'type': 'Deposit', 'check_no': '', 'payee': '',
+             'description': 'DEPOSIT', 'category': 'Spiritwear', 'amount': 898.72,
+             'is_income': True, 'bank_statement_month': 'February 2026'},
+        ]),
+    ]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    build_credits_sheet(ws, credits_by_month, 'Test PTA')
+
+    # Locate the band row (col C = 'Bank Deposit') and the two rows below it.
+    band_row_idx = next(
+        r for r in range(1, ws.max_row + 1) if ws.cell(row=r, column=3).value == 'Bank Deposit')
+    band_left_border = ws.cell(row=band_row_idx, column=1).border
+    nested1_border = ws.cell(row=band_row_idx + 1, column=1).border
+    nested2_border = ws.cell(row=band_row_idx + 2, column=1).border  # last nested row
+
+    assert band_left_border.top.style == 'medium'
+    assert band_left_border.left.style == 'medium'
+    assert nested1_border.left.style == 'medium'
+    assert nested1_border.bottom.style == 'thin'  # seam between nested rows stays thin
+    assert nested2_border.left.style == 'medium'
+    assert nested2_border.bottom.style == 'medium'  # bottom of the whole group is bold
 
 
 def test_build_credits_sheet_no_band_for_unmatched_multi_row_date():
@@ -444,7 +614,7 @@ def test_build_credits_sheet_no_band_for_unmatched_multi_row_date():
     ws = wb.active
     build_credits_sheet(ws, credits_by_month, 'Test PTA')
     rows = _cell_values(ws)
-    assert not any(r[1] == 'Bank Deposit' for r in rows)
+    assert not any(r[2] == 'Bank Deposit' for r in rows)
 
 
 MOCK_DEBITS_BY_MONTH = [
